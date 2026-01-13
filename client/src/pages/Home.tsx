@@ -1,13 +1,11 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { CheckCircle2, ImagePlus, Loader2, LogOut, Upload, XCircle, Trash2 } from "lucide-react";
+import { CheckCircle2, ImagePlus, Loader2, LogOut, Upload, XCircle, Trash2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -28,6 +26,7 @@ interface ImageGroup {
   url: string;
   status: "idle" | "creating" | "success" | "error";
   errorMessage?: string;
+  adId?: string;
 }
 
 interface Campaign {
@@ -52,7 +51,12 @@ interface Ad {
 }
 
 export default function Home() {
-  const { user, loading: authLoading, logout } = useAuth();
+  const { data: user } = trpc.auth.me.useQuery();
+  const logoutMutation = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      window.location.reload();
+    },
+  });
   
   // Facebook connection state
   const [fbConnected, setFbConnected] = useState(false);
@@ -67,6 +71,10 @@ export default function Home() {
   // Image state
   const [imageGroups, setImageGroups] = useState<ImageGroup[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  
+  // Batch creation state
+  const [isCreatingAll, setIsCreatingAll] = useState(false);
+  const [createdAdSetId, setCreatedAdSetId] = useState<string | null>(null);
   
   // Template data (from selected ad)
   const [templateData, setTemplateData] = useState({
@@ -111,8 +119,15 @@ export default function Home() {
     { enabled: !!fbAccessToken && !!selectedAd }
   );
 
+  const templateInfoQuery = trpc.meta.getTemplateInfo.useQuery(
+    { accessToken: fbAccessToken || "", adId: selectedAd },
+    { enabled: !!fbAccessToken && !!selectedAd }
+  );
+
   // Mutations
-  const createFullAdMutation = trpc.meta.createFullAd.useMutation();
+  const batchCreateAdsMutation = trpc.meta.batchCreateAds.useMutation();
+  const createSingleAdMutation = trpc.meta.createSingleAd.useMutation();
+  const duplicateAdSetMutation = trpc.meta.duplicateAdSet.useMutation();
 
   // Update template data when ad details load
   useEffect(() => {
@@ -131,6 +146,11 @@ export default function Home() {
       })));
     }
   }, [adDetailsQuery.data]);
+
+  // Reset created ad set when template changes
+  useEffect(() => {
+    setCreatedAdSetId(null);
+  }, [selectedAd, newAdSetName]);
 
   // Facebook Login handler
   const handleFacebookLogin = () => {
@@ -169,7 +189,6 @@ export default function Home() {
       reader.readAsDataURL(file);
       reader.onload = () => {
         const result = reader.result as string;
-        // Remove data URL prefix to get pure base64
         const base64 = result.split(",")[1];
         resolve(base64);
       };
@@ -248,10 +267,15 @@ export default function Home() {
     );
   };
 
-  // Create single ad
+  // Create single ad (needs existing ad set or creates one)
   const handleCreateAd = async (index: number) => {
     if (!fbAccessToken || !selectedAd) {
       toast.error("Please connect Facebook and select a template ad");
+      return;
+    }
+
+    if (!templateInfoQuery.data) {
+      toast.error("Template info not loaded yet");
       return;
     }
 
@@ -262,10 +286,31 @@ export default function Home() {
     );
 
     try {
-      const result = await createFullAdMutation.mutateAsync({
+      let adSetId: string | null = createdAdSetId;
+      let adAccountId = templateInfoQuery.data.adAccountId;
+      
+      // If no ad set created yet, duplicate it first
+      if (!adSetId) {
+        const duplicateResult = await duplicateAdSetMutation.mutateAsync({
+          accessToken: fbAccessToken,
+          adSetId: selectedAdSet,
+          newName: newAdSetName || `${group.adName}_adset`,
+        });
+        adSetId = duplicateResult.id;
+        adAccountId = duplicateResult.adAccountId;
+        setCreatedAdSetId(adSetId);
+        toast.info(`Created new Ad Set: ${duplicateResult.name}`);
+      }
+
+      // Create the ad in the ad set
+      if (!adSetId) {
+        throw new Error("Ad Set ID is required");
+      }
+      const result = await createSingleAdMutation.mutateAsync({
         accessToken: fbAccessToken,
-        templateAdId: selectedAd,
-        newAdSetName: newAdSetName || `${group.adName}_adset`,
+        adAccountId,
+        adSetId: adSetId,
+        pageId: templateInfoQuery.data.pageId,
         adName: group.adName,
         primaryText: group.primaryText,
         headline: group.headline,
@@ -278,7 +323,7 @@ export default function Home() {
       });
 
       setImageGroups((prev) =>
-        prev.map((g, i) => (i === index ? { ...g, status: "success" } : g))
+        prev.map((g, i) => (i === index ? { ...g, status: "success", adId: result.adId } : g))
       );
       toast.success(`Ad "${group.adName}" created successfully!`);
     } catch (error: unknown) {
@@ -294,13 +339,81 @@ export default function Home() {
     }
   };
 
-  // Create all ads
+  // Create all ads using batch endpoint
   const handleCreateAll = async () => {
+    if (!fbAccessToken || !selectedAd) {
+      toast.error("Please connect Facebook and select a template ad");
+      return;
+    }
+
     const pendingGroups = imageGroups.filter((g) => g.status !== "success");
-    for (let i = 0; i < imageGroups.length; i++) {
-      if (imageGroups[i].status !== "success") {
-        await handleCreateAd(i);
+    if (pendingGroups.length === 0) {
+      toast.info("All ads already created");
+      return;
+    }
+
+    setIsCreatingAll(true);
+    
+    // Mark all pending as creating
+    setImageGroups((prev) =>
+      prev.map((g) => (g.status !== "success" ? { ...g, status: "creating" } : g))
+    );
+
+    try {
+      const result = await batchCreateAdsMutation.mutateAsync({
+        accessToken: fbAccessToken,
+        templateAdId: selectedAd,
+        newAdSetName: newAdSetName || `Batch_${new Date().toISOString().slice(0, 10)}`,
+        ads: pendingGroups.map((group) => ({
+          adName: group.adName,
+          primaryText: group.primaryText,
+          headline: group.headline,
+          url: group.url,
+          images: group.images.map((img) => ({
+            filename: img.name,
+            aspectRatio: img.aspectRatio,
+            base64: img.base64,
+          })),
+        })),
+      });
+
+      setCreatedAdSetId(result.adSetId);
+
+      // Update status for each group based on results
+      setImageGroups((prev) => {
+        const newGroups = [...prev];
+        result.results.forEach((res) => {
+          const groupIndex = newGroups.findIndex(
+            (g) => g.adName === res.adName && g.status === "creating"
+          );
+          if (groupIndex !== -1) {
+            if (res.success) {
+              newGroups[groupIndex] = { ...newGroups[groupIndex], status: "success", adId: res.adId };
+            } else {
+              newGroups[groupIndex] = { ...newGroups[groupIndex], status: "error", errorMessage: res.error };
+            }
+          }
+        });
+        return newGroups;
+      });
+
+      const successCount = result.results.filter((r) => r.success).length;
+      const failCount = result.results.filter((r) => !r.success).length;
+      
+      if (failCount === 0) {
+        toast.success(`All ${successCount} ads created successfully in Ad Set "${result.adSetName}"!`);
+      } else {
+        toast.warning(`Created ${successCount} ads, ${failCount} failed`);
       }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      // Mark all creating as error
+      setImageGroups((prev) =>
+        prev.map((g) => (g.status === "creating" ? { ...g, status: "error", errorMessage } : g))
+      );
+      toast.error(`Batch creation failed: ${errorMessage}`);
+    } finally {
+      setIsCreatingAll(false);
     }
   };
 
@@ -312,6 +425,14 @@ export default function Home() {
   // Clear all groups
   const clearAllGroups = () => {
     setImageGroups([]);
+    setCreatedAdSetId(null);
+  };
+
+  // Retry failed
+  const retryFailed = () => {
+    setImageGroups((prev) =>
+      prev.map((g) => (g.status === "error" ? { ...g, status: "idle", errorMessage: undefined } : g))
+    );
   };
 
   // Status icon component
@@ -345,37 +466,11 @@ export default function Home() {
     }
   };
 
-  // Loading state
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  // Not logged in to Manus
-  if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 gap-6">
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Upload className="h-8 w-8 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold">Meta Ads Uploader</h1>
-          <p className="text-muted-foreground">Duplicate Ad Sets and create ads with ease</p>
-        </div>
-        <Button asChild size="lg">
-          <a href={getLoginUrl()}>Login to Get Started</a>
-        </Button>
-      </div>
-    );
-  }
-
   const campaigns = (campaignsQuery.data || []) as Campaign[];
   const adSets = (adSetsQuery.data || []) as AdSet[];
   const ads = (adsQuery.data || []) as Ad[];
   const pendingCount = imageGroups.filter((g) => g.status !== "success").length;
+  const errorCount = imageGroups.filter((g) => g.status === "error").length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -400,8 +495,8 @@ export default function Home() {
               </Button>
             )}
             <div className="flex items-center gap-2 border-l pl-4">
-              <span className="text-sm text-muted-foreground">{user.name}</span>
-              <Button variant="ghost" size="icon" onClick={() => logout()}>
+              <span className="text-sm text-muted-foreground">{user?.name || "User"}</span>
+              <Button variant="ghost" size="icon" onClick={() => logoutMutation.mutate()}>
                 <LogOut className="h-4 w-4" />
               </Button>
             </div>
@@ -427,6 +522,7 @@ export default function Home() {
                   setSelectedCampaign(value);
                   setSelectedAdSet("");
                   setSelectedAd("");
+                  setCreatedAdSetId(null);
                 }}
                 disabled={!fbConnected}
               >
@@ -450,6 +546,7 @@ export default function Home() {
                 onValueChange={(value) => {
                   setSelectedAdSet(value);
                   setSelectedAd("");
+                  setCreatedAdSetId(null);
                 }}
                 disabled={!selectedCampaign}
               >
@@ -494,6 +591,11 @@ export default function Home() {
             <CardTitle className="text-lg flex items-center gap-2">
               <span className="w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm">2</span>
               New Ad Set Name
+              {createdAdSetId && (
+                <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                  ✓ Ad Set Created
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -501,11 +603,13 @@ export default function Home() {
               value={newAdSetName}
               onChange={(e) => setNewAdSetName(e.target.value)}
               placeholder="Enter name for the duplicated Ad Set..."
-              disabled={!selectedAdSet}
+              disabled={!selectedAdSet || !!createdAdSetId}
               className="max-w-xl"
             />
             <p className="text-xs text-muted-foreground mt-2">
-              This will be the name of the new Ad Set created from the template
+              {createdAdSetId 
+                ? "Ad Set has been created. All new ads will be added to this Ad Set."
+                : "This will be the name of the new Ad Set created from the template. All ads will be created in this single Ad Set."}
             </p>
           </CardContent>
         </Card>
@@ -567,16 +671,31 @@ export default function Home() {
                 Configure Ads ({imageGroups.length} groups)
               </h2>
               <div className="flex gap-2">
+                {errorCount > 0 && (
+                  <Button variant="outline" size="sm" onClick={retryFailed}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Retry Failed ({errorCount})
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={clearAllGroups}>
                   <Trash2 className="h-4 w-4 mr-2" />
                   Clear All
                 </Button>
                 <Button
                   onClick={handleCreateAll}
-                  disabled={!selectedAd || pendingCount === 0}
+                  disabled={!selectedAd || pendingCount === 0 || isCreatingAll}
                 >
-                  <Upload className="h-4 w-4 mr-2" />
-                  Create All Ads ({pendingCount})
+                  {isCreatingAll ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Create All Ads ({pendingCount})
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -672,7 +791,7 @@ export default function Home() {
                         <Button
                           size="sm"
                           onClick={() => handleCreateAd(index)}
-                          disabled={!selectedAd || group.status === "creating" || group.status === "success"}
+                          disabled={!selectedAd || group.status === "creating" || group.status === "success" || isCreatingAll}
                         >
                           {group.status === "creating" ? (
                             <>

@@ -31,3 +31,12 @@
 - [x] Loading states for API calls
 - [x] Error handling and display
 - [x] Success feedback after ad creation
+
+## Issues Found & Fixes Needed
+- [ ] Fix: createFullAd creates new Ad Set for EACH ad instead of ONE Ad Set with multiple ads
+- [ ] Fix: Need to track if Ad Set was already duplicated to reuse it for subsequent ads
+- [ ] Fix: Add Ad Account selector (user may have multiple ad accounts)
+- [ ] Fix: Handle placement-specific images (9x16 for Stories, 4x5 for Feed) in creative
+
+- [x] Replace Manus OAuth with simple username/password login (iorguletz/cinema10)
+- [x] Remove registration option - single fixed account only

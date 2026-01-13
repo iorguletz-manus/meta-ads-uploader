@@ -3,6 +3,12 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { SignJWT } from "jose";
+import { ENV } from "./_core/env";
+
+// Fixed credentials - single account
+const FIXED_USERNAME = "iorguletz";
+const FIXED_PASSWORD = "cinema10";
 
 // Meta API base URL
 const META_API_BASE = "https://graph.facebook.com/v24.0";
@@ -30,6 +36,38 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    login: publicProcedure
+      .input(z.object({ username: z.string(), password: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        // Validate against fixed credentials
+        if (input.username !== FIXED_USERNAME || input.password !== FIXED_PASSWORD) {
+          throw new Error("Invalid username or password");
+        }
+        
+        // Create JWT token
+        const secret = new TextEncoder().encode(ENV.cookieSecret);
+        const token = await new SignJWT({ 
+          sub: "fixed-user",
+          openId: "fixed-user-id",
+          name: FIXED_USERNAME,
+        })
+          .setProtectedHeader({ alg: "HS256" })
+          .setIssuedAt()
+          .setExpirationTime("7d")
+          .sign(secret);
+        
+        // Set cookie
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, token, {
+          ...cookieOptions,
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        });
+        
+        return { 
+          success: true,
+          user: { name: FIXED_USERNAME }
+        };
+      }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -82,7 +120,7 @@ export const appRouter = router({
           status: string;
           daily_budget?: string;
           lifetime_budget?: string;
-          targeting?: any;
+          targeting?: unknown;
         }>;
       }),
 
@@ -146,7 +184,7 @@ export const appRouter = router({
         };
       }),
 
-    // Duplicate ad set
+    // Duplicate ad set - returns the new ad set ID
     duplicateAdSet: protectedProcedure
       .input(z.object({
         accessToken: z.string(),
@@ -156,28 +194,24 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         // Get the original ad set details
         const originalAdSet = await metaApiRequest(
-          `/${input.adSetId}?fields=campaign_id,name,status,targeting,billing_event,optimization_goal,bid_amount,daily_budget,lifetime_budget,start_time,end_time,promoted_object`,
+          `/${input.adSetId}?fields=campaign_id,name,status,targeting,billing_event,optimization_goal,bid_amount,daily_budget,lifetime_budget,start_time,end_time,promoted_object,account_id`,
           input.accessToken
         );
         
-        // Get the ad account from the ad set
-        const adSetWithAccount = await metaApiRequest(
-          `/${input.adSetId}?fields=account_id`,
-          input.accessToken
-        );
-        
-        const adAccountId = `act_${adSetWithAccount.account_id}`;
+        const adAccountId = `act_${originalAdSet.account_id}`;
         
         // Create new ad set with same settings
-        const newAdSetData: any = {
+        const newAdSetData: Record<string, string> = {
           name: input.newName,
           campaign_id: originalAdSet.campaign_id,
           status: "PAUSED", // Start paused for safety
-          targeting: JSON.stringify(originalAdSet.targeting),
-          billing_event: originalAdSet.billing_event,
-          optimization_goal: originalAdSet.optimization_goal,
+          billing_event: originalAdSet.billing_event || "IMPRESSIONS",
+          optimization_goal: originalAdSet.optimization_goal || "LINK_CLICKS",
         };
         
+        if (originalAdSet.targeting) {
+          newAdSetData.targeting = JSON.stringify(originalAdSet.targeting);
+        }
         if (originalAdSet.bid_amount) {
           newAdSetData.bid_amount = originalAdSet.bid_amount;
         }
@@ -214,7 +248,32 @@ export const appRouter = router({
         }
         
         const result = await response.json();
-        return { id: result.id, name: input.newName };
+        return { 
+          id: result.id, 
+          name: input.newName,
+          adAccountId,
+        };
+      }),
+
+    // Get page ID from template ad
+    getTemplateInfo: protectedProcedure
+      .input(z.object({ accessToken: z.string(), adId: z.string() }))
+      .query(async ({ input }) => {
+        const templateAd = await metaApiRequest(
+          `/${input.adId}?fields=adset_id,account_id,creative{object_story_spec}`,
+          input.accessToken
+        );
+        
+        let pageId = "";
+        if (templateAd.creative?.object_story_spec?.page_id) {
+          pageId = templateAd.creative.object_story_spec.page_id;
+        }
+        
+        return {
+          adSetId: templateAd.adset_id,
+          adAccountId: `act_${templateAd.account_id}`,
+          pageId,
+        };
       }),
 
     // Upload image to ad account
@@ -252,121 +311,202 @@ export const appRouter = router({
         };
       }),
 
-    // Create ad creative
-    createAdCreative: protectedProcedure
+    // Create a single ad in an existing ad set
+    createSingleAd: protectedProcedure
       .input(z.object({
         accessToken: z.string(),
         adAccountId: z.string(),
-        name: z.string(),
+        adSetId: z.string(),
         pageId: z.string(),
+        adName: z.string(),
         primaryText: z.string(),
         headline: z.string(),
         url: z.string(),
-        imageHashes: z.array(z.object({
-          hash: z.string(),
+        images: z.array(z.object({
+          filename: z.string(),
           aspectRatio: z.string(),
+          base64: z.string(),
         })),
       }))
       .mutation(async ({ input }) => {
-        // Build asset feed spec for multiple placements
-        const assetFeedSpec: any = {
-          bodies: [{ text: input.primaryText }],
-          titles: [{ text: input.headline }],
-          link_urls: [{ website_url: input.url }],
-          call_to_action_types: ["LEARN_MORE"],
-          images: input.imageHashes.map(img => ({ hash: img.hash })),
+        // Step 1: Upload all images
+        const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
+        
+        for (const image of input.images) {
+          if (!image.base64) continue;
+          
+          const imageFormData = new URLSearchParams();
+          imageFormData.append("bytes", image.base64);
+          imageFormData.append("name", image.filename);
+          
+          const imageResponse = await fetch(
+            `${META_API_BASE}/${input.adAccountId}/adimages?access_token=${input.accessToken}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: imageFormData.toString(),
+            }
+          );
+          
+          if (!imageResponse.ok) {
+            const error = await imageResponse.json();
+            throw new Error(`Failed to upload image ${image.filename}: ${error.error?.message || "Unknown error"}`);
+          }
+          
+          const imageResult = await imageResponse.json();
+          const imageKey = Object.keys(imageResult.images)[0];
+          uploadedImages.push({
+            hash: imageResult.images[imageKey].hash,
+            aspectRatio: image.aspectRatio,
+          });
+        }
+        
+        if (uploadedImages.length === 0) {
+          throw new Error("No images were uploaded");
+        }
+        
+        // Step 2: Create ad creative with placement asset customization
+        // Map aspect ratios to Facebook placements
+        const getPlacementForAspectRatio = (ratio: string): string[] => {
+          switch (ratio) {
+            case "9x16":
+              return ["instagram_story", "facebook_story", "instagram_reels"];
+            case "4x5":
+              return ["instagram_stream", "facebook_feed"];
+            case "1x1":
+              return ["instagram_stream", "facebook_feed", "instagram_explore"];
+            case "16x9":
+              return ["facebook_feed", "audience_network_instream_video"];
+            default:
+              return ["facebook_feed"];
+          }
         };
         
-        const creativeData = {
-          name: input.name,
-          object_story_spec: JSON.stringify({
-            page_id: input.pageId,
-            link_data: {
-              message: input.primaryText,
-              name: input.headline,
-              link: input.url,
-              call_to_action: { type: "LEARN_MORE" },
-              image_hash: input.imageHashes[0]?.hash, // Primary image
-            },
-          }),
-          asset_feed_spec: JSON.stringify(assetFeedSpec),
-        };
+        // Build creative data
+        // If we have multiple aspect ratios, use asset_feed_spec for placement customization
+        // Otherwise, use simple object_story_spec
+        let creativeData: Record<string, string>;
         
-        const formData = new URLSearchParams();
+        if (uploadedImages.length > 1) {
+          // Multiple images - use asset feed spec for placement customization
+          const assetFeedSpec = {
+            images: uploadedImages.map(img => ({ hash: img.hash })),
+            bodies: [{ text: input.primaryText }],
+            titles: [{ text: input.headline }],
+            descriptions: [{ text: input.headline }],
+            link_urls: [{ website_url: input.url }],
+            call_to_action_types: ["LEARN_MORE"],
+            ad_formats: ["SINGLE_IMAGE"],
+          };
+          
+          creativeData = {
+            name: `${input.adName}_creative`,
+            object_story_spec: JSON.stringify({
+              page_id: input.pageId,
+              link_data: {
+                message: input.primaryText,
+                name: input.headline,
+                link: input.url,
+                call_to_action: { type: "LEARN_MORE" },
+                image_hash: uploadedImages[0].hash,
+              },
+            }),
+            asset_feed_spec: JSON.stringify(assetFeedSpec),
+          };
+        } else {
+          // Single image - simple creative
+          creativeData = {
+            name: `${input.adName}_creative`,
+            object_story_spec: JSON.stringify({
+              page_id: input.pageId,
+              link_data: {
+                message: input.primaryText,
+                name: input.headline,
+                link: input.url,
+                call_to_action: { type: "LEARN_MORE" },
+                image_hash: uploadedImages[0].hash,
+              },
+            }),
+          };
+        }
+        
+        const creativeFormData = new URLSearchParams();
         Object.entries(creativeData).forEach(([key, value]) => {
-          formData.append(key, String(value));
+          creativeFormData.append(key, value);
         });
         
-        const response = await fetch(
+        const creativeResponse = await fetch(
           `${META_API_BASE}/${input.adAccountId}/adcreatives?access_token=${input.accessToken}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: formData.toString(),
+            body: creativeFormData.toString(),
           }
         );
         
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error?.message || "Failed to create ad creative");
+        if (!creativeResponse.ok) {
+          const error = await creativeResponse.json();
+          throw new Error(`Failed to create creative: ${error.error?.message || "Unknown error"}`);
         }
         
-        const result = await response.json();
-        return { id: result.id };
-      }),
-
-    // Create ad
-    createAd: protectedProcedure
-      .input(z.object({
-        accessToken: z.string(),
-        adSetId: z.string(),
-        newAdSetName: z.string(),
-        adName: z.string(),
-        primaryText: z.string(),
-        headline: z.string(),
-        url: z.string(),
-        images: z.array(z.object({
-          filename: z.string(),
-          aspectRatio: z.string(),
-          base64: z.string(),
-        })),
-      }))
-      .mutation(async ({ input }) => {
-        // This is a simplified version - in production you'd:
-        // 1. Duplicate the ad set
-        // 2. Upload all images
-        // 3. Create ad creative with proper placement mapping
-        // 4. Create the ad
+        const newCreative = await creativeResponse.json();
         
-        // For now, return a mock success
-        // The actual implementation requires the ad account ID and page ID
-        // which we'll get from the selected ad set
+        // Step 3: Create the ad
+        const adData = {
+          name: input.adName,
+          adset_id: input.adSetId,
+          creative: JSON.stringify({ creative_id: newCreative.id }),
+          status: "PAUSED",
+        };
+        
+        const adFormData = new URLSearchParams();
+        Object.entries(adData).forEach(([key, value]) => {
+          adFormData.append(key, value);
+        });
+        
+        const adResponse = await fetch(
+          `${META_API_BASE}/${input.adAccountId}/ads?access_token=${input.accessToken}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: adFormData.toString(),
+          }
+        );
+        
+        if (!adResponse.ok) {
+          const error = await adResponse.json();
+          throw new Error(`Failed to create ad: ${error.error?.message || "Unknown error"}`);
+        }
+        
+        const newAd = await adResponse.json();
         
         return {
           success: true,
-          adId: "mock_ad_id",
-          message: "Ad creation initiated",
+          creativeId: newCreative.id,
+          adId: newAd.id,
         };
       }),
 
-    // Full ad creation flow
-    createFullAd: protectedProcedure
+    // Batch create all ads (duplicate ad set once, then create multiple ads)
+    batchCreateAds: protectedProcedure
       .input(z.object({
         accessToken: z.string(),
         templateAdId: z.string(),
         newAdSetName: z.string(),
-        adName: z.string(),
-        primaryText: z.string(),
-        headline: z.string(),
-        url: z.string(),
-        images: z.array(z.object({
-          filename: z.string(),
-          aspectRatio: z.string(),
-          base64: z.string(),
+        ads: z.array(z.object({
+          adName: z.string(),
+          primaryText: z.string(),
+          headline: z.string(),
+          url: z.string(),
+          images: z.array(z.object({
+            filename: z.string(),
+            aspectRatio: z.string(),
+            base64: z.string(),
+          })),
         })),
       }))
       .mutation(async ({ input }) => {
-        // Get template ad details to extract ad set, account, and page info
+        // Get template info
         const templateAd = await metaApiRequest(
           `/${input.templateAdId}?fields=adset_id,account_id,creative{object_story_spec}`,
           input.accessToken
@@ -385,7 +525,7 @@ export const appRouter = router({
           throw new Error("Could not determine page ID from template ad");
         }
         
-        // Step 1: Duplicate the ad set
+        // Step 1: Duplicate the ad set ONCE
         const originalAdSet = await metaApiRequest(
           `/${originalAdSetId}?fields=campaign_id,targeting,billing_event,optimization_goal,bid_amount,daily_budget,lifetime_budget,promoted_object`,
           input.accessToken
@@ -436,108 +576,126 @@ export const appRouter = router({
         
         const newAdSet = await adSetResponse.json();
         
-        // Step 2: Upload images
-        const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
+        // Step 2: Create each ad in the new ad set
+        const results: Array<{ adName: string; success: boolean; adId?: string; error?: string }> = [];
         
-        for (const image of input.images) {
-          if (!image.base64) continue;
-          
-          const imageFormData = new URLSearchParams();
-          imageFormData.append("bytes", image.base64);
-          imageFormData.append("name", image.filename);
-          
-          const imageResponse = await fetch(
-            `${META_API_BASE}/${adAccountId}/adimages?access_token=${input.accessToken}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: imageFormData.toString(),
+        for (const ad of input.ads) {
+          try {
+            // Upload images for this ad
+            const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
+            
+            for (const image of ad.images) {
+              if (!image.base64) continue;
+              
+              const imageFormData = new URLSearchParams();
+              imageFormData.append("bytes", image.base64);
+              imageFormData.append("name", image.filename);
+              
+              const imageResponse = await fetch(
+                `${META_API_BASE}/${adAccountId}/adimages?access_token=${input.accessToken}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  body: imageFormData.toString(),
+                }
+              );
+              
+              if (!imageResponse.ok) {
+                const error = await imageResponse.json();
+                throw new Error(`Failed to upload image: ${error.error?.message || "Unknown error"}`);
+              }
+              
+              const imageResult = await imageResponse.json();
+              const imageKey = Object.keys(imageResult.images)[0];
+              uploadedImages.push({
+                hash: imageResult.images[imageKey].hash,
+                aspectRatio: image.aspectRatio,
+              });
             }
-          );
-          
-          if (!imageResponse.ok) {
-            const error = await imageResponse.json();
-            throw new Error(`Failed to upload image ${image.filename}: ${error.error?.message || "Unknown error"}`);
+            
+            if (uploadedImages.length === 0) {
+              throw new Error("No images were uploaded");
+            }
+            
+            // Create creative
+            const creativeData = {
+              name: `${ad.adName}_creative`,
+              object_story_spec: JSON.stringify({
+                page_id: pageId,
+                link_data: {
+                  message: ad.primaryText,
+                  name: ad.headline,
+                  link: ad.url,
+                  call_to_action: { type: "LEARN_MORE" },
+                  image_hash: uploadedImages[0].hash,
+                },
+              }),
+            };
+            
+            const creativeFormData = new URLSearchParams();
+            Object.entries(creativeData).forEach(([key, value]) => {
+              creativeFormData.append(key, value);
+            });
+            
+            const creativeResponse = await fetch(
+              `${META_API_BASE}/${adAccountId}/adcreatives?access_token=${input.accessToken}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: creativeFormData.toString(),
+              }
+            );
+            
+            if (!creativeResponse.ok) {
+              const error = await creativeResponse.json();
+              throw new Error(`Failed to create creative: ${error.error?.message || "Unknown error"}`);
+            }
+            
+            const newCreative = await creativeResponse.json();
+            
+            // Create ad
+            const adData = {
+              name: ad.adName,
+              adset_id: newAdSet.id,
+              creative: JSON.stringify({ creative_id: newCreative.id }),
+              status: "PAUSED",
+            };
+            
+            const adFormData = new URLSearchParams();
+            Object.entries(adData).forEach(([key, value]) => {
+              adFormData.append(key, value);
+            });
+            
+            const adResponse = await fetch(
+              `${META_API_BASE}/${adAccountId}/ads?access_token=${input.accessToken}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: adFormData.toString(),
+              }
+            );
+            
+            if (!adResponse.ok) {
+              const error = await adResponse.json();
+              throw new Error(`Failed to create ad: ${error.error?.message || "Unknown error"}`);
+            }
+            
+            const newAd = await adResponse.json();
+            results.push({ adName: ad.adName, success: true, adId: newAd.id });
+            
+          } catch (error) {
+            results.push({ 
+              adName: ad.adName, 
+              success: false, 
+              error: error instanceof Error ? error.message : "Unknown error" 
+            });
           }
-          
-          const imageResult = await imageResponse.json();
-          const imageKey = Object.keys(imageResult.images)[0];
-          uploadedImages.push({
-            hash: imageResult.images[imageKey].hash,
-            aspectRatio: image.aspectRatio,
-          });
         }
-        
-        // Step 3: Create ad creative
-        const creativeData = {
-          name: `${input.adName}_creative`,
-          object_story_spec: JSON.stringify({
-            page_id: pageId,
-            link_data: {
-              message: input.primaryText,
-              name: input.headline,
-              link: input.url,
-              call_to_action: { type: "LEARN_MORE" },
-              image_hash: uploadedImages[0]?.hash,
-            },
-          }),
-        };
-        
-        const creativeFormData = new URLSearchParams();
-        Object.entries(creativeData).forEach(([key, value]) => {
-          creativeFormData.append(key, value);
-        });
-        
-        const creativeResponse = await fetch(
-          `${META_API_BASE}/${adAccountId}/adcreatives?access_token=${input.accessToken}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: creativeFormData.toString(),
-          }
-        );
-        
-        if (!creativeResponse.ok) {
-          const error = await creativeResponse.json();
-          throw new Error(`Failed to create creative: ${error.error?.message || "Unknown error"}`);
-        }
-        
-        const newCreative = await creativeResponse.json();
-        
-        // Step 4: Create the ad
-        const adData = {
-          name: input.adName,
-          adset_id: newAdSet.id,
-          creative: JSON.stringify({ creative_id: newCreative.id }),
-          status: "PAUSED",
-        };
-        
-        const adFormData = new URLSearchParams();
-        Object.entries(adData).forEach(([key, value]) => {
-          adFormData.append(key, value);
-        });
-        
-        const adResponse = await fetch(
-          `${META_API_BASE}/${adAccountId}/ads?access_token=${input.accessToken}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: adFormData.toString(),
-          }
-        );
-        
-        if (!adResponse.ok) {
-          const error = await adResponse.json();
-          throw new Error(`Failed to create ad: ${error.error?.message || "Unknown error"}`);
-        }
-        
-        const newAd = await adResponse.json();
         
         return {
-          success: true,
           adSetId: newAdSet.id,
-          creativeId: newCreative.id,
-          adId: newAd.id,
+          adSetName: input.newAdSetName,
+          results,
         };
       }),
   }),

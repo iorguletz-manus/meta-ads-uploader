@@ -208,8 +208,8 @@ describe("meta.getAdDetails", () => {
   });
 });
 
-describe("meta.createFullAd", () => {
-  it("should create a full ad with all steps", async () => {
+describe("meta.batchCreateAds", () => {
+  it("should batch create ads with all steps", async () => {
     // Mock template ad details
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -270,27 +270,32 @@ describe("meta.createFullAd", () => {
     const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.meta.createFullAd({
+    const result = await caller.meta.batchCreateAds({
       accessToken: "test-token",
       templateAdId: "template_ad_123",
       newAdSetName: "New Ad Set",
-      adName: "New Ad",
-      primaryText: "Check this out!",
-      headline: "Amazing Deal",
-      url: "https://example.com",
-      images: [
+      ads: [
         {
-          filename: "test_9x16.jpg",
-          aspectRatio: "9x16",
-          base64: "base64encodedimage",
+          adName: "New Ad",
+          primaryText: "Check this out!",
+          headline: "Amazing Deal",
+          url: "https://example.com",
+          images: [
+            {
+              filename: "test_9x16.jpg",
+              aspectRatio: "9x16",
+              base64: "base64encodedimage",
+            },
+          ],
         },
       ],
     });
 
-    expect(result.success).toBe(true);
     expect(result.adSetId).toBe("new_adset_123");
-    expect(result.creativeId).toBe("new_creative_123");
-    expect(result.adId).toBe("new_ad_123");
+    expect(result.adSetName).toBe("New Ad Set");
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].success).toBe(true);
+    expect(result.results[0].adId).toBe("new_ad_123");
   });
 
   it("should throw error when page ID cannot be determined", async () => {
@@ -309,15 +314,11 @@ describe("meta.createFullAd", () => {
     const caller = appRouter.createCaller(ctx);
 
     await expect(
-      caller.meta.createFullAd({
+      caller.meta.batchCreateAds({
         accessToken: "test-token",
         templateAdId: "template_ad_123",
         newAdSetName: "New Ad Set",
-        adName: "New Ad",
-        primaryText: "Text",
-        headline: "Headline",
-        url: "https://example.com",
-        images: [],
+        ads: [],
       })
     ).rejects.toThrow("Could not determine page ID from template ad");
   });
