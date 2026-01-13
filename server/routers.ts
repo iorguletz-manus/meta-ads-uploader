@@ -44,14 +44,14 @@ export const appRouter = router({
           throw new Error("Invalid username or password");
         }
         
-        // Create JWT token
+        // Create JWT token using SDK's session format
         const secret = new TextEncoder().encode(ENV.cookieSecret);
         const token = await new SignJWT({ 
-          sub: "fixed-user",
           openId: "fixed-user-id",
+          appId: ENV.appId,
           name: FIXED_USERNAME,
         })
-          .setProtectedHeader({ alg: "HS256" })
+          .setProtectedHeader({ alg: "HS256", typ: "JWT" })
           .setIssuedAt()
           .setExpirationTime("7d")
           .sign(secret);

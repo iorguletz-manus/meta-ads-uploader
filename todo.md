@@ -40,3 +40,4 @@
 
 - [x] Replace Manus OAuth with simple username/password login (iorguletz/cinema10)
 - [x] Remove registration option - single fixed account only
+- [ ] Create GitHub repository and push code
