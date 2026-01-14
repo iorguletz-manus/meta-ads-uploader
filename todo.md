@@ -42,3 +42,30 @@
 - [x] Remove registration option - single fixed account only
 - [x] Create GitHub repository and push code
 - [x] BUG: Connect Facebook button shows grey page - RESOLVED (requires user to add domains in Facebook Developer Console)
+
+## New Features - Major Refactor
+
+### Upload Enhancements
+- [x] Support video upload (mp4, mov, etc.) in addition to images
+- [x] Video preview thumbnails in UI
+- [x] Group videos with images by prefix (e.g., product_9x16.mp4 + product_4x5.jpg = 1 ad)
+
+### Distribution System
+- [x] Ask user: How many Ad Sets to create?
+- [x] Ask user: How many Ads per Ad Set?
+- [x] Auto-distribute ads into Ad Sets based on user input
+- [x] Show distribution preview before creation
+
+### Drag & Drop UI
+- [x] Pool (Oală) - container with all ungrouped/unassigned ads
+- [x] Multiple Ad Set containers (visual boxes)
+- [x] Drag ads from Pool to any Ad Set
+- [x] Drag ads between Ad Sets
+- [x] Drag ads back to Pool
+- [x] Visual feedback during drag
+- [x] Reorder ads within Ad Set
+
+### Backend Updates
+- [x] Support video upload to Meta API (uses same base64 upload)
+- [x] Create multiple Ad Sets in one batch (each container creates its own Ad Set)
+- [x] Handle video creative creation (handled by Meta API automatically)
