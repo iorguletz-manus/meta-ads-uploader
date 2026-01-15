@@ -12,13 +12,12 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Clock,
   Film,
   FolderOpen,
   ImagePlus,
   Loader2,
   LogOut,
-  Plus,
+  Search,
   Settings,
   Trash2,
   Upload,
@@ -27,7 +26,7 @@ import {
   EyeOff,
   Play,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 // Types
@@ -44,8 +43,8 @@ interface MediaFile {
 interface AdData {
   id: string;
   adName: string;
-  hook: string; // For images
-  primaryText: string; // For videos
+  hook: string;
+  primaryText: string;
   media: MediaFile[];
   status: "idle" | "creating" | "success" | "error";
   errorMessage?: string;
@@ -56,13 +55,16 @@ interface AdSetData {
   id: string;
   name: string;
   ads: AdData[];
-  sharedBody: string; // Shared body for image ads
+  sharedBody: string;
   sharedHeadline: string;
   sharedUrl: string;
   status: "idle" | "creating" | "success" | "error";
   createdAdSetId?: string;
   isExpanded: boolean;
   mediaType: "image" | "video" | "mixed";
+  scheduleEnabled: boolean;
+  scheduleDate: string;
+  scheduleTime: string;
 }
 
 interface Campaign {
@@ -95,6 +97,9 @@ interface AdAccount {
   account_status: number;
 }
 
+// Facebook mobile text width (approximately 320px for primary text area)
+const FB_TEXT_WIDTH = "320px";
+
 export default function Home() {
   // Auth state
   const { data: user, isLoading: authLoading } = trpc.auth.me.useQuery();
@@ -123,6 +128,11 @@ export default function Home() {
   const [selectedAdSet, setSelectedAdSet] = useState("");
   const [selectedAd, setSelectedAd] = useState("");
 
+  // Search filters
+  const [campaignSearch, setCampaignSearch] = useState("");
+  const [adSetSearch, setAdSetSearch] = useState("");
+  const [adSearch, setAdSearch] = useState("");
+
   // Show inactive toggles
   const [showInactiveCampaigns, setShowInactiveCampaigns] = useState(false);
   const [showInactiveAdSets, setShowInactiveAdSets] = useState(false);
@@ -139,10 +149,10 @@ export default function Home() {
   // Ad Sets for preview (Step 4)
   const [adSetsPreview, setAdSetsPreview] = useState<AdSetData[]>([]);
 
-  // Schedule settings
-  const [scheduleEnabled, setScheduleEnabled] = useState(false);
-  const [scheduleDate, setScheduleDate] = useState("");
-  const [scheduleTime, setScheduleTime] = useState("");
+  // Global schedule settings
+  const [globalScheduleEnabled, setGlobalScheduleEnabled] = useState(false);
+  const [globalScheduleDate, setGlobalScheduleDate] = useState("");
+  const [globalScheduleTime, setGlobalScheduleTime] = useState("");
 
   // Creating state
   const [isCreating, setIsCreating] = useState(false);
@@ -264,7 +274,6 @@ export default function Home() {
   // Google Drive Connect (placeholder)
   const handleGoogleDriveConnect = () => {
     toast.info("Google Drive integration coming soon!");
-    // TODO: Implement Google Drive OAuth
   };
 
   // Handle file upload
@@ -284,7 +293,6 @@ export default function Home() {
         reader.readAsDataURL(file);
       });
 
-      // Extract aspect ratio from filename
       let aspectRatio = "1x1";
       const name = file.name.toLowerCase();
       if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
@@ -312,7 +320,6 @@ export default function Home() {
     const groups = new Map<string, MediaFile[]>();
     
     for (const m of media) {
-      // Extract prefix (everything before _9x16, _4x5, etc.)
       const prefix = m.name
         .replace(/\.(jpg|jpeg|png|gif|mp4|mov|webm)$/i, "")
         .replace(/[_-]?(9x16|4x5|1x1|16x9|9_16|4_5|1_1|16_9)$/i, "")
@@ -337,12 +344,10 @@ export default function Home() {
     const groups = groupMediaByPrefix(mediaPool);
     const groupsArray = Array.from(groups.entries());
     
-    // Determine media type
     const hasImages = mediaPool.some(m => m.type === "image");
     const hasVideos = mediaPool.some(m => m.type === "video");
     const mediaType: "image" | "video" | "mixed" = hasImages && hasVideos ? "mixed" : hasVideos ? "video" : "image";
 
-    // Create ad sets
     const newAdSets: AdSetData[] = [];
     let groupIndex = 0;
 
@@ -353,7 +358,7 @@ export default function Home() {
         const [prefix, media] = groupsArray[groupIndex];
         ads.push({
           id: `ad-${Date.now()}-${groupIndex}`,
-          adName: prefix,
+          adName: prefix.toUpperCase(), // Always uppercase
           hook: "",
           primaryText: "",
           media,
@@ -373,6 +378,9 @@ export default function Home() {
           status: "idle",
           isExpanded: true,
           mediaType,
+          scheduleEnabled: false,
+          scheduleDate: "",
+          scheduleTime: "",
         });
       }
     }
@@ -394,7 +402,7 @@ export default function Home() {
     setAdSetsPreview((prev) =>
       prev.map((as) =>
         as.id === adSetId
-          ? { ...as, ads: as.ads.map((ad) => (ad.id === adId ? { ...ad, [field]: value } : ad)) }
+          ? { ...as, ads: as.ads.map((ad) => (ad.id === adId ? { ...ad, [field]: field === "adName" ? value.toUpperCase() : value } : ad)) }
           : as
       )
     );
@@ -414,6 +422,23 @@ export default function Home() {
     setAdSetsPreview((prev) => prev.filter((as) => as.id !== adSetId));
   };
 
+  // Apply global schedule to all ad sets
+  const applyGlobalSchedule = () => {
+    if (!globalScheduleDate || !globalScheduleTime) {
+      toast.error("Please set date and time first");
+      return;
+    }
+    setAdSetsPreview((prev) =>
+      prev.map((as) => ({
+        ...as,
+        scheduleEnabled: true,
+        scheduleDate: globalScheduleDate,
+        scheduleTime: globalScheduleTime,
+      }))
+    );
+    toast.success("Schedule applied to all Ad Sets");
+  };
+
   // Create all ads
   const handleCreateAll = async () => {
     if (!selectedAd || !selectedAdSet || !fbAccessToken) {
@@ -429,26 +454,23 @@ export default function Home() {
 
     setIsCreating(true);
 
-    let scheduledTime: number | undefined;
-    if (scheduleEnabled && scheduleDate && scheduleTime) {
-      const bucharestDate = new Date(`${scheduleDate}T${scheduleTime}:00`);
-      scheduledTime = Math.floor(bucharestDate.getTime() / 1000);
-    }
-
     for (const adSet of adSetsWithAds) {
       setAdSetsPreview((prev) =>
         prev.map((as) => (as.id === adSet.id ? { ...as, status: "creating" } : as))
       );
 
       try {
-        // Prepare ads with combined primary text
+        let scheduledTime: number | undefined;
+        if (adSet.scheduleEnabled && adSet.scheduleDate && adSet.scheduleTime) {
+          const bucharestDate = new Date(`${adSet.scheduleDate}T${adSet.scheduleTime}:00`);
+          scheduledTime = Math.floor(bucharestDate.getTime() / 1000);
+        }
+
         const adsToCreate = adSet.ads.map((ad) => {
           let primaryText = "";
           if (adSet.mediaType === "image" || adSet.mediaType === "mixed") {
-            // Combine hook + body for images
             primaryText = ad.hook ? `${ad.hook}\n\n${adSet.sharedBody}` : adSet.sharedBody;
           } else {
-            // Use direct primary text for videos
             primaryText = ad.primaryText;
           }
 
@@ -474,7 +496,6 @@ export default function Home() {
           scheduledTime: scheduledTime ? new Date(scheduledTime * 1000).toISOString() : undefined,
         });
 
-        // Update statuses
         const updatedAds = adSet.ads.map((ad, idx) => {
           const adResult = result.results[idx];
           return {
@@ -523,8 +544,8 @@ export default function Home() {
 
     try {
       let scheduledTime: number | undefined;
-      if (scheduleEnabled && scheduleDate && scheduleTime) {
-        const bucharestDate = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      if (adSet.scheduleEnabled && adSet.scheduleDate && adSet.scheduleTime) {
+        const bucharestDate = new Date(`${adSet.scheduleDate}T${adSet.scheduleTime}:00`);
         scheduledTime = Math.floor(bucharestDate.getTime() / 1000);
       }
 
@@ -592,9 +613,25 @@ export default function Home() {
     }
   };
 
-  const campaigns = (campaignsQuery.data || []) as Campaign[];
-  const adSets = (adSetsQuery.data || []) as AdSet[];
-  const ads = (adsQuery.data || []) as Ad[];
+  // Filter campaigns, ad sets, ads by search
+  const campaigns = useMemo(() => {
+    const data = (campaignsQuery.data || []) as Campaign[];
+    if (!campaignSearch) return data;
+    return data.filter(c => c.name.toLowerCase().includes(campaignSearch.toLowerCase()));
+  }, [campaignsQuery.data, campaignSearch]);
+
+  const adSets = useMemo(() => {
+    const data = (adSetsQuery.data || []) as AdSet[];
+    if (!adSetSearch) return data;
+    return data.filter(a => a.name.toLowerCase().includes(adSetSearch.toLowerCase()));
+  }, [adSetsQuery.data, adSetSearch]);
+
+  const ads = useMemo(() => {
+    const data = (adsQuery.data || []) as Ad[];
+    if (!adSearch) return data;
+    return data.filter(a => a.name.toLowerCase().includes(adSearch.toLowerCase()));
+  }, [adsQuery.data, adSearch]);
+
   const totalAdsInPreview = adSetsPreview.reduce((sum, as) => sum + as.ads.length, 0);
 
   // Loading state
@@ -616,91 +653,102 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
       <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container flex items-center justify-between h-14">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <Upload className="h-4 w-4 text-white" />
+        <div className="container flex items-center justify-between h-12">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <Upload className="h-3.5 w-3.5 text-white" />
             </div>
-            <h1 className="text-lg font-semibold">Meta Ads Uploader</h1>
+            <h1 className="text-base font-semibold">Meta Ads Uploader</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {fbConnected ? (
               <>
                 {selectedAdAccount && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    <span className="text-sm font-medium text-green-700">{selectedAccountName || selectedAdAccount}</span>
+                  <div className="flex items-center gap-1.5 px-2 py-1 bg-green-50 border border-green-200 rounded-full">
+                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                    <span className="text-xs font-medium text-green-700">{selectedAccountName || selectedAdAccount}</span>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-5 w-5 text-green-600 hover:text-green-800 hover:bg-green-100"
+                      className="h-4 w-4 text-green-600 hover:text-green-800 hover:bg-green-100"
                       onClick={() => setShowAdAccountModal(true)}
                     >
-                      <Settings className="h-3 w-3" />
+                      <Settings className="h-2.5 w-2.5" />
                     </Button>
                   </div>
                 )}
                 {!selectedAdAccount && (
-                  <Button variant="outline" size="sm" onClick={() => setShowAdAccountModal(true)}>
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowAdAccountModal(true)}>
                     Select Ad Account
                   </Button>
                 )}
-                <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 rounded-full text-sm">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  FB Connected
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-full text-xs">
+                  <CheckCircle2 className="h-3 w-3" />
+                  FB
                 </span>
               </>
             ) : (
-              <Button onClick={handleFacebookLogin} variant="outline" size="sm">
+              <Button onClick={handleFacebookLogin} variant="outline" size="sm" className="h-7 text-xs">
                 Connect Facebook
               </Button>
             )}
-            <div className="flex items-center gap-2 border-l pl-3">
-              <span className="text-sm text-muted-foreground">{user?.name || "User"}</span>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => logoutMutation.mutate()}>
-                <LogOut className="h-4 w-4" />
+            <div className="flex items-center gap-1.5 border-l pl-2">
+              <span className="text-xs text-muted-foreground">{user?.name || "User"}</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => logoutMutation.mutate()}>
+                <LogOut className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="container py-6 space-y-6">
+      <main className="container py-4 space-y-4">
         {/* Step 1: Select Template Ad */}
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <span className="w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-bold">
+          <CardHeader className="py-2 px-4">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                 1
               </span>
               Select Template Ad
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 pb-3">
             {!fbConnected || !selectedAdAccount ? (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-6 text-muted-foreground text-sm">
                 {!fbConnected ? "Connect Facebook to see your campaigns" : "Select an Ad Account from the header"}
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-4 h-[350px]">
+              <div className="grid grid-cols-3 gap-3 h-[280px]">
                 {/* Column 1: Campaigns */}
-                <div className="border rounded-lg flex flex-col">
-                  <div className="p-2 border-b bg-muted/50 flex items-center justify-between">
-                    <span className="text-sm font-medium">Campaigns</span>
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                <div className="border rounded-lg flex flex-col overflow-hidden">
+                  <div className="p-1.5 border-b bg-muted/50 flex items-center justify-between gap-1">
+                    <span className="text-xs font-medium">Campaigns</span>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                       <Checkbox
                         checked={showInactiveCampaigns}
                         onCheckedChange={(checked) => setShowInactiveCampaigns(!!checked)}
-                        className="h-3.5 w-3.5"
+                        className="h-3 w-3"
                       />
-                      {showInactiveCampaigns ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                      {showInactiveCampaigns ? <Eye className="h-2.5 w-2.5" /> : <EyeOff className="h-2.5 w-2.5" />}
                     </label>
                   </div>
+                  <div className="px-1.5 py-1 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <Input
+                        placeholder="Search..."
+                        value={campaignSearch}
+                        onChange={(e) => setCampaignSearch(e.target.value)}
+                        className="h-6 text-xs pl-6 pr-2"
+                      />
+                    </div>
+                  </div>
                   <ScrollArea className="flex-1">
-                    <div className="p-2 space-y-1">
+                    <div className="p-1">
                       {campaignsQuery.isLoading ? (
                         <div className="flex items-center justify-center py-4">
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3 w-3 animate-spin" />
                         </div>
                       ) : campaigns.length === 0 ? (
                         <p className="text-xs text-muted-foreground text-center py-4">No campaigns</p>
@@ -713,12 +761,11 @@ export default function Home() {
                               setSelectedAdSet("");
                               setSelectedAd("");
                             }}
-                            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                            className={`w-full text-left px-2 py-1 rounded text-xs transition-colors truncate ${
                               selectedCampaign === c.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
                             }`}
                           >
-                            <div className="font-medium truncate">{c.name}</div>
-                            <div className="text-xs opacity-70">{c.status}</div>
+                            {c.name}
                           </button>
                         ))
                       )}
@@ -727,25 +774,36 @@ export default function Home() {
                 </div>
 
                 {/* Column 2: Ad Sets */}
-                <div className="border rounded-lg flex flex-col">
-                  <div className="p-2 border-b bg-muted/50 flex items-center justify-between">
-                    <span className="text-sm font-medium">Ad Sets</span>
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                <div className="border rounded-lg flex flex-col overflow-hidden">
+                  <div className="p-1.5 border-b bg-muted/50 flex items-center justify-between gap-1">
+                    <span className="text-xs font-medium">Ad Sets</span>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                       <Checkbox
                         checked={showInactiveAdSets}
                         onCheckedChange={(checked) => setShowInactiveAdSets(!!checked)}
-                        className="h-3.5 w-3.5"
+                        className="h-3 w-3"
                       />
-                      {showInactiveAdSets ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                      {showInactiveAdSets ? <Eye className="h-2.5 w-2.5" /> : <EyeOff className="h-2.5 w-2.5" />}
                     </label>
                   </div>
+                  <div className="px-1.5 py-1 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <Input
+                        placeholder="Search..."
+                        value={adSetSearch}
+                        onChange={(e) => setAdSetSearch(e.target.value)}
+                        className="h-6 text-xs pl-6 pr-2"
+                      />
+                    </div>
+                  </div>
                   <ScrollArea className="flex-1">
-                    <div className="p-2 space-y-1">
+                    <div className="p-1">
                       {!selectedCampaign ? (
                         <p className="text-xs text-muted-foreground text-center py-4">Select a campaign</p>
                       ) : adSetsQuery.isLoading ? (
                         <div className="flex items-center justify-center py-4">
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3 w-3 animate-spin" />
                         </div>
                       ) : adSets.length === 0 ? (
                         <p className="text-xs text-muted-foreground text-center py-4">No ad sets</p>
@@ -757,12 +815,11 @@ export default function Home() {
                               setSelectedAdSet(a.id);
                               setSelectedAd("");
                             }}
-                            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                            className={`w-full text-left px-2 py-1 rounded text-xs transition-colors truncate ${
                               selectedAdSet === a.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
                             }`}
                           >
-                            <div className="font-medium truncate">{a.name}</div>
-                            <div className="text-xs opacity-70">{a.status}</div>
+                            {a.name}
                           </button>
                         ))
                       )}
@@ -771,25 +828,36 @@ export default function Home() {
                 </div>
 
                 {/* Column 3: Ads */}
-                <div className="border rounded-lg flex flex-col">
-                  <div className="p-2 border-b bg-muted/50 flex items-center justify-between">
-                    <span className="text-sm font-medium">Ads</span>
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                <div className="border rounded-lg flex flex-col overflow-hidden">
+                  <div className="p-1.5 border-b bg-muted/50 flex items-center justify-between gap-1">
+                    <span className="text-xs font-medium">Ads</span>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                       <Checkbox
                         checked={showInactiveAds}
                         onCheckedChange={(checked) => setShowInactiveAds(!!checked)}
-                        className="h-3.5 w-3.5"
+                        className="h-3 w-3"
                       />
-                      {showInactiveAds ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                      {showInactiveAds ? <Eye className="h-2.5 w-2.5" /> : <EyeOff className="h-2.5 w-2.5" />}
                     </label>
                   </div>
+                  <div className="px-1.5 py-1 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <Input
+                        placeholder="Search..."
+                        value={adSearch}
+                        onChange={(e) => setAdSearch(e.target.value)}
+                        className="h-6 text-xs pl-6 pr-2"
+                      />
+                    </div>
+                  </div>
                   <ScrollArea className="flex-1">
-                    <div className="p-2 space-y-1">
+                    <div className="p-1">
                       {!selectedAdSet ? (
                         <p className="text-xs text-muted-foreground text-center py-4">Select an ad set</p>
                       ) : adsQuery.isLoading ? (
                         <div className="flex items-center justify-center py-4">
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3 w-3 animate-spin" />
                         </div>
                       ) : ads.length === 0 ? (
                         <p className="text-xs text-muted-foreground text-center py-4">No ads</p>
@@ -798,23 +866,20 @@ export default function Home() {
                           <button
                             key={a.id}
                             onClick={() => setSelectedAd(a.id)}
-                            className={`w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
+                            className={`w-full text-left px-1.5 py-1 rounded text-xs transition-colors flex items-center gap-1.5 ${
                               selectedAd === a.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
                             }`}
                           >
-                            <div className="w-10 h-10 rounded overflow-hidden bg-muted flex-shrink-0">
+                            <div className="w-6 h-6 rounded overflow-hidden bg-muted flex-shrink-0">
                               {a.creative?.thumbnail_url || a.creative?.image_url ? (
                                 <img src={a.creative.thumbnail_url || a.creative.image_url} alt="" className="w-full h-full object-cover" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                  <ImagePlus className="h-4 w-4 text-muted-foreground" />
+                                  <ImagePlus className="h-3 w-3 text-muted-foreground" />
                                 </div>
                               )}
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium truncate">{a.name}</div>
-                              <div className="text-xs opacity-70">{a.status}</div>
-                            </div>
+                            <span className="truncate flex-1">{a.name}</span>
                           </button>
                         ))
                       )}
@@ -828,22 +893,22 @@ export default function Home() {
 
         {/* Step 2: Upload Media */}
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <span className="w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-bold">
+          <CardHeader className="py-2 px-4">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                 2
               </span>
               Upload Media (Images / Videos)
               {mediaPool.length > 0 && (
-                <span className="text-sm font-normal text-muted-foreground">({mediaPool.length} files)</span>
+                <span className="text-xs font-normal text-muted-foreground">({mediaPool.length} files)</span>
               )}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex gap-4">
+          <CardContent className="px-4 pb-3">
+            <div className="flex gap-3">
               {/* Upload Zone */}
               <div
-                className="flex-1 border-2 border-dashed rounded-lg p-6 min-h-[200px] transition-colors hover:border-primary/50 cursor-pointer"
+                className="flex-1 border-2 border-dashed rounded-lg p-4 min-h-[150px] transition-colors hover:border-primary/50 cursor-pointer"
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.currentTarget.classList.add("border-primary", "bg-primary/5");
@@ -872,25 +937,22 @@ export default function Home() {
               >
                 {mediaPool.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <div className="flex gap-3 mb-3">
-                      <ImagePlus className="h-10 w-10" />
-                      <Film className="h-10 w-10" />
+                    <div className="flex gap-2 mb-2">
+                      <ImagePlus className="h-8 w-8" />
+                      <Film className="h-8 w-8" />
                     </div>
-                    <p className="font-medium text-lg">Drop images & videos here</p>
-                    <p className="text-sm mt-1">or click to browse</p>
-                    <p className="text-xs mt-3 text-muted-foreground/70">
-                      Name files like: product_9x16.jpg, product_4x5.mp4
-                    </p>
+                    <p className="font-medium text-sm">Drop images & videos here</p>
+                    <p className="text-xs mt-1">or click to browse</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-6 gap-2">
+                  <div className="grid grid-cols-8 gap-1.5">
                     {mediaPool.map((m) => (
-                      <div key={m.id} className="relative group aspect-square rounded-lg overflow-hidden bg-muted">
+                      <div key={m.id} className="relative group aspect-square rounded overflow-hidden bg-muted">
                         {m.type === "image" ? (
                           <img src={m.preview} alt="" className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-slate-800">
-                            <Play className="h-8 w-8 text-white" />
+                            <Play className="h-4 w-4 text-white" />
                           </div>
                         )}
                         <button
@@ -898,11 +960,11 @@ export default function Home() {
                             e.stopPropagation();
                             setMediaPool((prev) => prev.filter((p) => p.id !== m.id));
                           }}
-                          className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                          className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                         >
-                          <XCircle className="h-3 w-3" />
+                          <XCircle className="h-2.5 w-2.5" />
                         </button>
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-1 py-0.5 truncate">
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] px-0.5 truncate">
                           {m.aspectRatio}
                         </div>
                       </div>
@@ -912,18 +974,18 @@ export default function Home() {
               </div>
 
               {/* Google Drive Button */}
-              <div className="w-48 flex flex-col gap-2">
+              <div className="w-32 flex flex-col gap-1.5">
                 <Button
                   variant="outline"
-                  className="h-auto py-4 flex-col gap-2"
+                  className="h-auto py-3 flex-col gap-1.5 text-xs"
                   onClick={handleGoogleDriveConnect}
                 >
-                  <FolderOpen className="h-6 w-6" />
-                  <span className="text-sm">Import from Google Drive</span>
+                  <FolderOpen className="h-5 w-5" />
+                  <span>Google Drive</span>
                 </Button>
                 {gdriveConnected && (
-                  <span className="text-xs text-green-600 text-center flex items-center justify-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
+                  <span className="text-[10px] text-green-600 text-center flex items-center justify-center gap-0.5">
+                    <CheckCircle2 className="h-2.5 w-2.5" />
                     Connected
                   </span>
                 )}
@@ -934,97 +996,62 @@ export default function Home() {
 
         {/* Step 3: Establish Nr of Adsets */}
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <span className="w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-bold">
+          <CardHeader className="py-2 px-4">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                 3
               </span>
               Establish Nr of Adsets
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-3">
-                <Label className="text-sm">Number of Ad Sets:</Label>
+          <CardContent className="px-4 pb-3">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Ad Sets:</Label>
                 <Input
                   type="number"
                   min={1}
                   max={20}
                   value={numAdSets}
                   onChange={(e) => setNumAdSets(parseInt(e.target.value) || 1)}
-                  className="w-20"
+                  className="w-16 h-7 text-xs"
                 />
               </div>
-              <div className="flex items-center gap-3">
-                <Label className="text-sm">Ads per Ad Set:</Label>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Ads per Set:</Label>
                 <Input
                   type="number"
                   min={1}
                   max={50}
                   value={adsPerAdSet}
                   onChange={(e) => setAdsPerAdSet(parseInt(e.target.value) || 1)}
-                  className="w-20"
+                  className="w-16 h-7 text-xs"
                 />
               </div>
-              <Button onClick={handleDistribute} disabled={mediaPool.length === 0} size="lg">
+              <Button onClick={handleDistribute} disabled={mediaPool.length === 0} size="sm" className="h-7">
                 Distribute
               </Button>
             </div>
-            {mediaPool.length > 0 && (
-              <p className="text-sm text-muted-foreground mt-3">
-                {mediaPool.length} files will be grouped and distributed into {numAdSets} Ad Set(s) with up to {adsPerAdSet} ads each.
-              </p>
-            )}
           </CardContent>
         </Card>
 
         {/* Step 4: Preview (only shown after Distribute) */}
         {showPreview && adSetsPreview.length > 0 && (
           <Card>
-            <CardHeader className="pb-3">
+            <CardHeader className="py-2 px-4">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <span className="w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-bold">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                     4
                   </span>
                   Preview
-                  <span className="text-sm font-normal text-muted-foreground">
+                  <span className="text-xs font-normal text-muted-foreground">
                     ({adSetsPreview.length} Ad Sets, {totalAdsInPreview} Ads)
                   </span>
                 </CardTitle>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="schedule"
-                      checked={scheduleEnabled}
-                      onCheckedChange={(checked) => setScheduleEnabled(!!checked)}
-                    />
-                    <Label htmlFor="schedule" className="text-sm flex items-center gap-1 cursor-pointer">
-                      <Calendar className="h-3.5 w-3.5" />
-                      Schedule
-                    </Label>
-                  </div>
-                  {scheduleEnabled && (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="date"
-                        value={scheduleDate}
-                        onChange={(e) => setScheduleDate(e.target.value)}
-                        className="h-8 w-36"
-                      />
-                      <Input
-                        type="time"
-                        value={scheduleTime}
-                        onChange={(e) => setScheduleTime(e.target.value)}
-                        className="h-8 w-28"
-                      />
-                      <span className="text-xs text-muted-foreground">(București)</span>
-                    </div>
-                  )}
-                </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="px-4 pb-3 space-y-3">
               {adSetsPreview.map((adSet) => (
                 <Card
                   key={adSet.id}
@@ -1036,192 +1063,212 @@ export default function Home() {
                       : ""
                   }`}
                 >
-                  <CardHeader className="py-3 px-4">
+                  <CardHeader className="py-2 px-3">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-1">
+                      <div className="flex items-center gap-2 flex-1">
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6"
+                          className="h-5 w-5"
                           onClick={() => updateAdSet(adSet.id, "isExpanded", !adSet.isExpanded)}
                         >
-                          {adSet.isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          {adSet.isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                         </Button>
                         <Input
                           value={adSet.name}
                           onChange={(e) => updateAdSet(adSet.id, "name", e.target.value)}
-                          className="h-8 font-medium max-w-xs"
+                          className="h-6 text-xs font-medium max-w-[200px]"
                           placeholder="Ad Set Name"
                         />
-                        <span className="text-sm text-muted-foreground">({adSet.ads.length} ads)</span>
-                        {adSet.status === "success" && <CheckCircle2 className="h-5 w-5 text-green-500" />}
-                        {adSet.status === "error" && <XCircle className="h-5 w-5 text-red-500" />}
-                        {adSet.status === "creating" && <Loader2 className="h-5 w-5 animate-spin text-blue-500" />}
+                        <span className="text-xs text-muted-foreground">({adSet.ads.length} ads)</span>
+                        {adSet.status === "success" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                        {adSet.status === "error" && <XCircle className="h-4 w-4 text-red-500" />}
+                        {adSet.status === "creating" && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
                       </div>
                       <div className="flex items-center gap-2">
+                        {/* Per Ad Set Schedule */}
+                        <div className="flex items-center gap-1.5">
+                          <Checkbox
+                            checked={adSet.scheduleEnabled}
+                            onCheckedChange={(checked) => updateAdSet(adSet.id, "scheduleEnabled", !!checked)}
+                            className="h-3 w-3"
+                          />
+                          <Calendar className="h-3 w-3 text-muted-foreground" />
+                          {adSet.scheduleEnabled && (
+                            <>
+                              <Input
+                                type="date"
+                                value={adSet.scheduleDate}
+                                onChange={(e) => updateAdSet(adSet.id, "scheduleDate", e.target.value)}
+                                className="h-5 w-28 text-[10px]"
+                              />
+                              <Input
+                                type="time"
+                                value={adSet.scheduleTime}
+                                onChange={(e) => updateAdSet(adSet.id, "scheduleTime", e.target.value)}
+                                className="h-5 w-20 text-[10px]"
+                              />
+                            </>
+                          )}
+                        </div>
                         <Button
                           size="sm"
+                          className="h-6 text-xs"
                           onClick={() => handleCreateSingleAdSet(adSet.id)}
                           disabled={isCreating || adSet.status === "success" || !selectedAd}
                         >
                           {adSet.status === "creating" ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <Loader2 className="h-3 w-3 animate-spin" />
                           ) : (
-                            "Create This Ad Set"
+                            "Create"
                           )}
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-red-500 hover:text-red-700"
+                          className="h-6 w-6 text-red-500 hover:text-red-700"
                           onClick={() => removeAdSet(adSet.id)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
                     </div>
                   </CardHeader>
 
                   {adSet.isExpanded && (
-                    <CardContent className="pt-0 px-4 pb-4">
-                      <div className="flex gap-6">
-                        {/* Left side: Ads list */}
-                        <div className="flex-1 space-y-3">
-                          {adSet.ads.map((ad, adIndex) => (
-                            <div
-                              key={ad.id}
-                              className={`border rounded-lg p-3 ${
-                                ad.status === "success"
-                                  ? "border-green-200 bg-green-50"
-                                  : ad.status === "error"
-                                  ? "border-red-200 bg-red-50"
-                                  : ""
-                              }`}
-                            >
-                              <div className="flex gap-4">
-                                {/* Ad fields */}
-                                <div className="flex-1 space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <Label className="text-xs w-20 text-muted-foreground">Ad Name:</Label>
-                                    <Input
-                                      value={ad.adName}
-                                      onChange={(e) => updateAd(adSet.id, ad.id, "adName", e.target.value)}
-                                      className="h-7 text-sm flex-1"
-                                      placeholder="Ad name"
-                                    />
-                                    {ad.status === "success" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-                                    {ad.status === "error" && <XCircle className="h-4 w-4 text-red-500" />}
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6"
-                                      onClick={() => removeAd(adSet.id, ad.id)}
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
+                    <CardContent className="pt-0 px-3 pb-3">
+                      <div className="space-y-2">
+                        {/* Ads list */}
+                        {adSet.ads.map((ad, adIndex) => (
+                          <div
+                            key={ad.id}
+                            className={`border rounded p-2 ${
+                              ad.status === "success"
+                                ? "border-green-200 bg-green-50"
+                                : ad.status === "error"
+                                ? "border-red-200 bg-red-50"
+                                : ""
+                            }`}
+                          >
+                            <div className="flex gap-3">
+                              {/* Media preview */}
+                              <div className="flex-shrink-0">
+                                {ad.media.length > 0 && (
+                                  <div className="space-y-1">
+                                    {ad.media.slice(0, 1).map((m) => (
+                                      <div
+                                        key={m.id}
+                                        className="rounded overflow-hidden bg-muted"
+                                        style={{
+                                          width: m.type === "video" ? "200px" : "120px",
+                                          height: m.type === "video" ? "112px" : "120px",
+                                        }}
+                                      >
+                                        {m.type === "image" ? (
+                                          <img src={m.preview} alt="" className="w-full h-full object-cover" />
+                                        ) : (
+                                          <video
+                                            src={m.preview}
+                                            className="w-full h-full object-cover"
+                                            controls
+                                            muted
+                                          />
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
+                                )}
+                              </div>
 
-                                  {/* For images: Hook field */}
-                                  {adSet.mediaType !== "video" && (
-                                    <div className="flex items-start gap-2">
-                                      <Label className="text-xs w-20 text-muted-foreground pt-2">Hook {adIndex + 1}:</Label>
-                                      <Textarea
-                                        value={ad.hook}
-                                        onChange={(e) => updateAd(adSet.id, ad.id, "hook", e.target.value)}
-                                        className="flex-1 text-sm resize-y"
-                                        style={{ minHeight: "225px" }}
-                                        placeholder="Hook text for this ad..."
-                                      />
-                                    </div>
-                                  )}
-
-                                  {/* For videos: Primary Text field */}
-                                  {adSet.mediaType === "video" && (
-                                    <div className="flex items-start gap-2">
-                                      <Label className="text-xs w-20 text-muted-foreground pt-2">Primary Text:</Label>
-                                      <Textarea
-                                        value={ad.primaryText}
-                                        onChange={(e) => updateAd(adSet.id, ad.id, "primaryText", e.target.value)}
-                                        className="flex-1 text-sm resize-y"
-                                        style={{ minHeight: "100px" }}
-                                        placeholder="Primary text..."
-                                      />
-                                    </div>
-                                  )}
-
-                                  {ad.errorMessage && (
-                                    <p className="text-xs text-red-500 ml-20">{ad.errorMessage}</p>
-                                  )}
+                              {/* Ad fields */}
+                              <div className="flex-1 space-y-1.5" style={{ maxWidth: FB_TEXT_WIDTH }}>
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    value={ad.adName}
+                                    onChange={(e) => updateAd(adSet.id, ad.id, "adName", e.target.value)}
+                                    className="h-6 text-xs font-medium flex-1 uppercase"
+                                    placeholder="AD NAME"
+                                  />
+                                  {ad.status === "success" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                                  {ad.status === "error" && <XCircle className="h-3 w-3 text-red-500" />}
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5"
+                                    onClick={() => removeAd(adSet.id, ad.id)}
+                                  >
+                                    <Trash2 className="h-2.5 w-2.5" />
+                                  </Button>
                                 </div>
 
-                                {/* Media preview */}
-                                <div className="flex-shrink-0">
-                                  {ad.media.length > 0 && (
-                                    <div className="space-y-2">
-                                      {ad.media.map((m) => (
-                                        <div
-                                          key={m.id}
-                                          className="rounded-lg overflow-hidden bg-muted"
-                                          style={{
-                                            width: m.type === "video" ? "320px" : "200px",
-                                            height: m.type === "video" ? "180px" : "200px",
-                                          }}
-                                        >
-                                          {m.type === "image" ? (
-                                            <img src={m.preview} alt="" className="w-full h-full object-cover" />
-                                          ) : (
-                                            <video
-                                              src={m.preview}
-                                              className="w-full h-full object-cover"
-                                              controls
-                                              muted
-                                            />
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
+                                {/* For images: Hook field */}
+                                {adSet.mediaType !== "video" && (
+                                  <div>
+                                    <Label className="text-[10px] text-muted-foreground">Hook {adIndex + 1}</Label>
+                                    <Textarea
+                                      value={ad.hook}
+                                      onChange={(e) => updateAd(adSet.id, ad.id, "hook", e.target.value)}
+                                      className="text-xs resize-y"
+                                      style={{ minHeight: "110px", width: "100%" }}
+                                      placeholder="Hook text..."
+                                    />
+                                  </div>
+                                )}
+
+                                {/* For videos: Primary Text field */}
+                                {adSet.mediaType === "video" && (
+                                  <div>
+                                    <Label className="text-[10px] text-muted-foreground">Primary Text</Label>
+                                    <Textarea
+                                      value={ad.primaryText}
+                                      onChange={(e) => updateAd(adSet.id, ad.id, "primaryText", e.target.value)}
+                                      className="text-xs resize-y"
+                                      style={{ minHeight: "80px", width: "100%" }}
+                                      placeholder="Primary text..."
+                                    />
+                                  </div>
+                                )}
+
+                                {ad.errorMessage && (
+                                  <p className="text-[10px] text-red-500">{ad.errorMessage}</p>
+                                )}
                               </div>
                             </div>
-                          ))}
+                          </div>
+                        ))}
 
-                          {/* Shared fields for image ads */}
+                        {/* Shared fields */}
+                        <div className="border-t pt-2 mt-2 space-y-1.5" style={{ maxWidth: FB_TEXT_WIDTH }}>
+                          {/* Shared Body for image ads */}
                           {adSet.mediaType !== "video" && (
-                            <div className="border-t pt-4 mt-4 space-y-3">
-                              <div className="flex items-start gap-2">
-                                <Label className="text-xs w-20 text-muted-foreground pt-2">Body:</Label>
-                                <Textarea
-                                  value={adSet.sharedBody}
-                                  onChange={(e) => updateAdSet(adSet.id, "sharedBody", e.target.value)}
-                                  className="flex-1 text-sm resize-y"
-                                  style={{ minHeight: "485px" }}
-                                  placeholder="Shared body text (combined with each hook)..."
-                                />
-                              </div>
+                            <div>
+                              <Label className="text-[10px] text-muted-foreground">Body (shared)</Label>
+                              <Textarea
+                                value={adSet.sharedBody}
+                                onChange={(e) => updateAdSet(adSet.id, "sharedBody", e.target.value)}
+                                className="text-xs resize-y"
+                                style={{ minHeight: "200px", width: "100%" }}
+                                placeholder="Shared body text..."
+                              />
                             </div>
                           )}
-
-                          {/* Shared Headline and URL */}
-                          <div className="border-t pt-4 mt-4 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <Label className="text-xs w-20 text-muted-foreground">Headline:</Label>
-                              <Input
-                                value={adSet.sharedHeadline}
-                                onChange={(e) => updateAdSet(adSet.id, "sharedHeadline", e.target.value)}
-                                className="flex-1 h-8 text-sm"
-                                placeholder="Shared headline for all ads"
-                              />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Label className="text-xs w-20 text-muted-foreground">URL:</Label>
-                              <Input
-                                value={adSet.sharedUrl}
-                                onChange={(e) => updateAdSet(adSet.id, "sharedUrl", e.target.value)}
-                                className="flex-1 h-8 text-sm"
-                                placeholder="https://..."
-                              />
-                            </div>
+                          <div>
+                            <Label className="text-[10px] text-muted-foreground">Headline (shared)</Label>
+                            <Input
+                              value={adSet.sharedHeadline}
+                              onChange={(e) => updateAdSet(adSet.id, "sharedHeadline", e.target.value)}
+                              className="h-6 text-xs"
+                              placeholder="Headline"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-[10px] text-muted-foreground">URL (shared)</Label>
+                            <Input
+                              value={adSet.sharedUrl}
+                              onChange={(e) => updateAdSet(adSet.id, "sharedUrl", e.target.value)}
+                              className="h-6 text-xs"
+                              placeholder="https://..."
+                            />
                           </div>
                         </div>
                       </div>
@@ -1230,24 +1277,56 @@ export default function Home() {
                 </Card>
               ))}
 
-              {/* Create All Button */}
-              <div className="flex justify-end pt-4">
-                <Button size="lg" onClick={handleCreateAll} disabled={!selectedAd || isCreating} className="px-8">
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-4 w-4 mr-2" />
-                      Create All ({adSetsPreview.length} Ad Sets, {totalAdsInPreview} Ads)
-                      {scheduleEnabled && scheduleDate && scheduleTime && (
-                        <span className="ml-2 text-xs opacity-75">@ {scheduleDate} {scheduleTime}</span>
-                      )}
-                    </>
-                  )}
-                </Button>
+              {/* Global Schedule + Create All */}
+              <div className="border-t pt-3 mt-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <Checkbox
+                        checked={globalScheduleEnabled}
+                        onCheckedChange={(checked) => setGlobalScheduleEnabled(!!checked)}
+                        className="h-3 w-3"
+                      />
+                      <Label className="text-xs flex items-center gap-1 cursor-pointer">
+                        <Calendar className="h-3 w-3" />
+                        Schedule All
+                      </Label>
+                    </div>
+                    {globalScheduleEnabled && (
+                      <>
+                        <Input
+                          type="date"
+                          value={globalScheduleDate}
+                          onChange={(e) => setGlobalScheduleDate(e.target.value)}
+                          className="h-6 w-32 text-xs"
+                        />
+                        <Input
+                          type="time"
+                          value={globalScheduleTime}
+                          onChange={(e) => setGlobalScheduleTime(e.target.value)}
+                          className="h-6 w-24 text-xs"
+                        />
+                        <span className="text-[10px] text-muted-foreground">(București)</span>
+                        <Button size="sm" variant="outline" className="h-6 text-xs" onClick={applyGlobalSchedule}>
+                          Apply to All
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                  <Button size="sm" onClick={handleCreateAll} disabled={!selectedAd || isCreating} className="h-7">
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-3 w-3 mr-1.5" />
+                        Create All ({adSetsPreview.length} Ad Sets)
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1256,11 +1335,11 @@ export default function Home() {
         {/* Empty state */}
         {!fbConnected && (
           <Card className="border-dashed border-2">
-            <CardContent className="py-12 text-center">
-              <Upload className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-medium mb-2">Connect Your Facebook Account</h3>
-              <p className="text-muted-foreground mb-4">To start creating ads, connect your Facebook account.</p>
-              <Button onClick={handleFacebookLogin} size="lg">
+            <CardContent className="py-8 text-center">
+              <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+              <h3 className="text-base font-medium mb-1.5">Connect Your Facebook Account</h3>
+              <p className="text-sm text-muted-foreground mb-3">To start creating ads, connect your Facebook account.</p>
+              <Button onClick={handleFacebookLogin} size="sm">
                 Connect Facebook
               </Button>
             </CardContent>
@@ -1272,18 +1351,18 @@ export default function Home() {
       <Dialog open={showAdAccountModal} onOpenChange={setShowAdAccountModal}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Manage Ad Accounts</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-base">Manage Ad Accounts</DialogTitle>
+            <DialogDescription className="text-xs">
               {isFirstConnect
                 ? "Select which Ad Accounts you want to use."
                 : "Enable or disable Ad Accounts."}
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[300px] overflow-y-auto space-y-2 py-4">
+          <div className="max-h-[250px] overflow-y-auto space-y-1.5 py-3">
             {allAdAccounts.map((acc) => (
               <div
                 key={acc.id}
-                className={`flex items-center space-x-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                className={`flex items-center space-x-2 p-2 rounded border cursor-pointer transition-colors ${
                   enabledAdAccounts.includes(acc.id) ? "border-primary bg-primary/5" : "hover:bg-muted/50"
                 }`}
                 onClick={() => toggleAdAccount(acc.id)}
@@ -1291,26 +1370,27 @@ export default function Home() {
                 <Checkbox
                   checked={enabledAdAccounts.includes(acc.id)}
                   onCheckedChange={() => toggleAdAccount(acc.id)}
+                  className="h-3 w-3"
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{acc.name || "Unnamed Account"}</p>
-                  <p className="text-xs text-muted-foreground">{acc.id}</p>
+                  <p className="text-xs font-medium truncate">{acc.name || "Unnamed Account"}</p>
+                  <p className="text-[10px] text-muted-foreground">{acc.id}</p>
                 </div>
               </div>
             ))}
             {allAdAccounts.length === 0 && (
-              <p className="text-center text-muted-foreground py-4">No Ad Accounts found</p>
+              <p className="text-center text-muted-foreground py-4 text-xs">No Ad Accounts found</p>
             )}
           </div>
           {enabledAdAccounts.length > 0 && (
-            <div className="border-t pt-4">
-              <Label className="text-sm font-medium mb-2 block">Active Account:</Label>
+            <div className="border-t pt-3">
+              <Label className="text-xs font-medium mb-1.5 block">Active Account:</Label>
               <div className="space-y-1">
                 {enabledAdAccountsList.map((acc) => (
                   <button
                     key={acc.id}
                     onClick={() => setSelectedAdAccount(acc.id)}
-                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                    className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
                       selectedAdAccount === acc.id
                         ? "bg-green-100 text-green-800 border border-green-300"
                         : "hover:bg-muted"
@@ -1324,6 +1404,7 @@ export default function Home() {
           )}
           <DialogFooter>
             <Button
+              size="sm"
               onClick={() => {
                 saveEnabledAccounts(enabledAdAccounts);
                 setShowAdAccountModal(false);

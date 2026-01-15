@@ -614,7 +614,9 @@ export const appRouter = router({
         
         if (!adSetResponse.ok) {
           const error = await adSetResponse.json();
-          throw new Error(`Failed to create ad set: ${error.error?.message || "Unknown error"}`);
+          console.error("Ad Set creation error:", JSON.stringify(error, null, 2));
+          console.error("Request data:", JSON.stringify(newAdSetData, null, 2));
+          throw new Error(`Failed to create ad set: ${error.error?.message || JSON.stringify(error)}`);
         }
         
         const newAdSet = await adSetResponse.json();

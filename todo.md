@@ -165,3 +165,22 @@
 - [ ] Google Drive Picker to select files
 - [ ] Download selected files from Drive and add to pool
 - [ ] Support images and videos from Drive
+
+
+## UI Improvements - Round 3
+
+### Step 1 - Template Selection Compact Design
+- [x] Font mic pentru campaigns/adsets/ads (nu mai mult spațiu)
+- [x] Eliminare status "Active" de sub fiecare item
+- [x] Reducere padding/margin pentru items compacte
+- [x] Adăugare search box pentru fiecare coloană (Campaigns, Ad Sets, Ads)
+- [x] Scroll intern în fiecare container (să nu afecteze Step 2, 3, 4)
+
+### Step 4 - Preview Improvements
+- [x] Hook textarea la jumătate înălțime (112px în loc de 225px)
+- [x] Textarea width similar cu Facebook (320px - pentru a vedea cum pică textul pe mobile)
+- [x] Schedule global jos de tot pentru toate Ad Set-urile + per Ad Set individual
+- [x] Ad Name întotdeauna cu LITERE MARI (uppercase)
+
+### Bug Fixes
+- [ ] Fix: "Invalid parameter" la creare Ad Set
