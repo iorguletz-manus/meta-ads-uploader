@@ -241,3 +241,21 @@
 ### Bug Fixes
 - [x] Fix eroare "Invalid parameter" la creare creative - adăugat call_to_action.value.link
 - [x] Adăugat logging detaliat pentru debugging
+
+
+## Cerințe Noi - Round 8
+
+### Grupare Vizuală Imagini
+- [x] Grupare imagini cu același nume dar aspect ratio diferit (4x5, 9x16) într-un singur grup vizual
+- [x] Afișare aspect ratio corect în header-ul grupului
+- [x] UI pentru a vedea clar grupările (card-uri cu numele și aspect ratio-urile)
+- [x] Sub fiecare imagine se afișează numele fișierului (nu aspect ratio)
+
+### Fix Eroare 413 Payload Too Large
+- [x] Comprimare imagini înainte de upload (max 1200px, quality 85%)
+- [x] Warning pentru video-uri mari (>50MB)
+
+### Rate Limiting Meta API
+- [x] Implementare rate limiting - pauză de 2s între Ad Sets
+- [x] Afișare progres și pauze în logs
+- [x] Meta API Limits: ~200 calls/hour pentru Standard tier, ~5000 pentru Dev tier

@@ -374,9 +374,38 @@ export default function Home() {
     toast.info("Google Drive integration coming soon!");
   };
 
+  // Compress image to reduce size
+  const compressImage = async (file: File, maxWidth = 1200, quality = 0.8): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        // Scale down if larger than maxWidth
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Convert to base64 with compression
+        const base64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(base64);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   // Handle file upload
   const handleFileUpload = useCallback(async (files: FileList) => {
     const newMedia: MediaFile[] = [];
+    toast.info(`Processing ${files.length} file(s)...`);
 
     for (const file of Array.from(files)) {
       const isVideo = file.type.startsWith("video/");
@@ -385,11 +414,22 @@ export default function Home() {
       if (!isVideo && !isImage) continue;
 
       const preview = URL.createObjectURL(file);
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file);
-      });
+      
+      let base64: string;
+      if (isImage) {
+        // Compress images to avoid 413 error
+        base64 = await compressImage(file, 1200, 0.85);
+      } else {
+        // For videos, keep original (but warn if too large)
+        if (file.size > 50 * 1024 * 1024) {
+          toast.warning(`Video ${file.name} is large (${(file.size / 1024 / 1024).toFixed(1)}MB). Upload may fail.`);
+        }
+        base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
 
       let aspectRatio = "1x1";
       const name = file.name.toLowerCase();
@@ -556,6 +596,9 @@ export default function Home() {
     setProgressLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
   };
 
+  // Rate limiting helper - wait between API calls
+  const rateLimitDelay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   // Create all ads
   const handleCreateAll = async () => {
     if (!selectedAd || !selectedAdSet || !fbAccessToken) {
@@ -666,6 +709,12 @@ export default function Home() {
         );
 
         toast.success(`Ad Set "${adSet.name}" created!`);
+        
+        // Rate limiting: wait 2 seconds between Ad Sets to avoid hitting Meta API limits
+        if (adSetIndex < adSetsWithAds.length - 1) {
+          addProgressLog(`  ⏳ Waiting 2s before next Ad Set (rate limiting)...`);
+          await rateLimitDelay(2000);
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
         addProgressLog(`  ✗ ERROR: ${errorMessage}`);
@@ -678,6 +727,12 @@ export default function Home() {
           )
         );
         toast.error(`Failed: ${errorMessage}`);
+        
+        // Rate limiting even on error
+        if (adSetIndex < adSetsWithAds.length - 1) {
+          addProgressLog(`  ⏳ Waiting 2s before next Ad Set...`);
+          await rateLimitDelay(2000);
+        }
       }
     }
 
@@ -1117,30 +1172,47 @@ export default function Home() {
                     <p className="text-xs mt-1">or click to browse</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-8 gap-1.5">
-                    {mediaPool.map((m) => (
-                      <div key={m.id} className="relative group aspect-square rounded overflow-hidden bg-muted">
-                        {m.type === "image" ? (
-                          <img src={m.preview} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-slate-800">
-                            <Play className="h-4 w-4 text-white" />
+                  <div className="space-y-2">
+                    {/* Grouped media display */}
+                    {(() => {
+                      const groups = groupMediaByPrefix(mediaPool);
+                      return Array.from(groups.entries()).map(([prefix, media]) => (
+                        <div key={prefix} className="border rounded-lg p-2 bg-muted/30">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-xs font-medium truncate flex-1">{prefix.toUpperCase()}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {media.map(m => m.aspectRatio).join(" + ")}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const idsToRemove = media.map(m => m.id);
+                                setMediaPool((prev) => prev.filter((p) => !idsToRemove.includes(p.id)));
+                              }}
+                              className="w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
+                            >
+                              <XCircle className="h-2.5 w-2.5" />
+                            </button>
                           </div>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMediaPool((prev) => prev.filter((p) => p.id !== m.id));
-                          }}
-                          className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                        >
-                          <XCircle className="h-2.5 w-2.5" />
-                        </button>
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] px-0.5 truncate">
-                          {m.aspectRatio}
+                          <div className="flex gap-1">
+                            {media.map((m) => (
+                              <div key={m.id} className="relative group w-12 h-12 rounded overflow-hidden bg-muted flex-shrink-0">
+                                {m.type === "image" ? (
+                                  <img src={m.preview} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-slate-800">
+                                    <Play className="h-3 w-3 text-white" />
+                                  </div>
+                                )}
+                                <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[6px] px-0.5 text-center truncate" title={m.name}>
+                                  {m.name.replace(/\.[^/.]+$/, "").slice(-10)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ));
+                    })()}
                   </div>
                 )}
               </div>
