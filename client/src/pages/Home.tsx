@@ -39,6 +39,8 @@ interface MediaFile {
   aspectRatio: string;
   base64: string;
   type: "image" | "video";
+  cdnUrl?: string; // Bunny.net CDN URL
+  bunnyPath?: string; // Path on Bunny storage for deletion
 }
 
 interface AdData {
@@ -207,16 +209,22 @@ export default function Home() {
   const [showInactiveAdSets, setShowInactiveAdSets] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADSETS, false));
   const [showInactiveAds, setShowInactiveAds] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADS, false));
 
-  // Media pool (Step 2) - initialize from localStorage
+  // Media pool (Step 2) - initialize from localStorage (CDN URLs)
   const [mediaPool, setMediaPool] = useState<MediaFile[]>(() => {
     try {
       const saved = localStorage.getItem(LS_KEYS.MEDIA_POOL);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Recreate preview URLs from base64
-        return parsed.map((m: MediaFile) => ({
-          ...m,
-          preview: m.base64, // Use base64 as preview since URL.createObjectURL won't work
+        // Restore from CDN URLs
+        return parsed.map((m: { id: string; name: string; aspectRatio: string; type: string; cdnUrl?: string; bunnyPath?: string }) => ({
+          id: m.id,
+          name: m.name,
+          aspectRatio: m.aspectRatio,
+          type: m.type as "image" | "video",
+          cdnUrl: m.cdnUrl,
+          bunnyPath: m.bunnyPath,
+          preview: m.cdnUrl || '', // Use CDN URL as preview
+          base64: '', // No base64 needed when we have CDN URL
           file: null as unknown as File, // File object can't be serialized
         }));
       }
@@ -338,25 +346,20 @@ export default function Home() {
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADSETS, showInactiveAdSets); }, [showInactiveAdSets]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADS, showInactiveAds); }, [showInactiveAds]);
   
-  // Save media pool to localStorage (with size limit check)
+  // Save media pool to localStorage (only save CDN URLs, not base64)
   useEffect(() => {
     try {
-      // Only save essential data (skip file object)
+      // Only save CDN URLs and metadata - no base64 data
       const toSave = mediaPool.map(m => ({
         id: m.id,
         name: m.name,
         aspectRatio: m.aspectRatio,
-        base64: m.base64,
         type: m.type,
-        preview: '', // Don't save preview URL
+        cdnUrl: m.cdnUrl,
+        bunnyPath: m.bunnyPath,
       }));
-      const json = JSON.stringify(toSave);
-      // Check size (localStorage limit is ~5MB)
-      if (json.length < 4 * 1024 * 1024) {
-        localStorage.setItem(LS_KEYS.MEDIA_POOL, json);
-      } else {
-        console.warn('Media pool too large for localStorage, not saving');
-      }
+      localStorage.setItem(LS_KEYS.MEDIA_POOL, JSON.stringify(toSave));
+      console.log(`[localStorage] Saved ${toSave.length} media items`);
     } catch (e) {
       console.error('Failed to save media to localStorage:', e);
     }
@@ -449,10 +452,13 @@ export default function Home() {
     });
   };
 
+  // Upload to Bunny mutation
+  const uploadToBunnyMutation = trpc.meta.uploadToBunny.useMutation();
+
   // Handle file upload
   const handleFileUpload = useCallback(async (files: FileList) => {
     const newMedia: MediaFile[] = [];
-    toast.info(`Processing ${files.length} file(s)...`);
+    toast.info(`Processing ${files.length} file(s)... Uploading to CDN...`);
 
     for (const file of Array.from(files)) {
       const isVideo = file.type.startsWith("video/");
@@ -478,27 +484,73 @@ export default function Home() {
         });
       }
 
+      // Detect aspect ratio from actual image dimensions
       let aspectRatio = "1x1";
-      const name = file.name.toLowerCase();
-      if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
-      else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
-      else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
-      else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+      if (isImage) {
+        aspectRatio = await new Promise<string>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const ratio = img.width / img.height;
+            let detected = "1x1";
+            // 9x16 = 0.5625, 4x5 = 0.8, 1x1 = 1.0, 16x9 = 1.778
+            if (ratio < 0.65) {
+              detected = "9x16"; // Portrait tall (9:16)
+            } else if (ratio < 0.9) {
+              detected = "4x5"; // Portrait (4:5)
+            } else if (ratio < 1.1) {
+              detected = "1x1"; // Square (1:1)
+            } else {
+              detected = "16x9"; // Landscape (16:9)
+            }
+            console.log(`[Aspect Ratio] File: ${file.name} -> ${img.width}x${img.height} = ${ratio.toFixed(2)} -> ${detected}`);
+            URL.revokeObjectURL(img.src);
+            resolve(detected);
+          };
+          img.onerror = () => resolve("1x1");
+          img.src = URL.createObjectURL(file);
+        });
+      } else {
+        // For videos, try to detect from filename or default to 9x16
+        const name = file.name.toLowerCase();
+        if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+        else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
+        else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
+        else aspectRatio = "9x16"; // Default for videos
+      }
+
+      // Upload to Bunny.net CDN
+      let cdnUrl: string | undefined;
+      let bunnyPath: string | undefined;
+      try {
+        const uploadResult = await uploadToBunnyMutation.mutateAsync({
+          fileName: file.name,
+          base64Data: base64,
+          contentType: file.type,
+        });
+        cdnUrl = uploadResult.cdnUrl;
+        bunnyPath = uploadResult.path;
+        console.log(`[Bunny] Uploaded: ${file.name} -> ${cdnUrl}`);
+      } catch (err) {
+        console.error(`[Bunny] Upload failed for ${file.name}:`, err);
+        toast.error(`Failed to upload ${file.name} to CDN`);
+      }
 
       newMedia.push({
         id: `media-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file,
-        preview,
+        preview: cdnUrl || preview, // Use CDN URL as preview if available
         name: file.name,
         aspectRatio,
         base64,
         type: isVideo ? "video" : "image",
+        cdnUrl,
+        bunnyPath,
       });
     }
 
     setMediaPool((prev) => [...prev, ...newMedia]);
-    toast.success(`${newMedia.length} file(s) added`);
-  }, []);
+    toast.success(`${newMedia.length} file(s) uploaded to CDN`);
+  }, [uploadToBunnyMutation]);
 
   // Group media by prefix
   const groupMediaByPrefix = (media: MediaFile[]): Map<string, MediaFile[]> => {

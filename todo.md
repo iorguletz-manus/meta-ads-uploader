@@ -268,3 +268,30 @@
 - [x] Adăugat salvare media pool în localStorage (cu limită 4MB)
 - [x] Fix auto-connect Facebook din localStorage când nu există token în DB
 - [x] Toate selecțiile (campaign, adset, ad, ad account) se salvează și se restaurează
+
+
+## Bug Fix - Round 10
+
+### Aspect Ratio Detection
+- [ ] Fix: Aspect ratio afișează 1x1 în loc de 4x5 sau 9x16
+- [ ] Verificare logica de detectare aspect ratio din numele fișierului
+
+### Show Paused Checkbox
+- [ ] Fix: Checkbox-ul "show paused" nu se păstrează la refresh
+
+### Invalid Parameter Error
+- [ ] Fix: Eroare "Invalid parameter" la creare creative
+- [ ] Investigare parametri lipsă pentru Meta API creative
+
+
+## Cerințe Noi - Round 11
+
+### Aspect Ratio Detection din Dimensiuni
+- [x] Detectare aspect ratio din dimensiunile reale ale imaginii (width/height)
+- [x] 4x5 = ratio ~0.8, 9x16 = ratio ~0.5625, 1x1 = ratio 1.0, 16x9 = ratio ~1.78
+
+### Bunny.net Storage Integration
+- [x] Integrare Bunny.net pentru salvare imagini (în loc de localStorage)
+- [x] Structură foldere: meta-ads-uploader/username/year/month/day/filename-timestamp.ext
+- [x] Upload imagini la Bunny.net când se adaugă în media pool
+- [x] localStorage salvează doar CDN URLs (nu base64)

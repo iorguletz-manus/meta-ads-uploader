@@ -1,6 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings } from "./db";
+import { uploadToBunny, deleteFromBunny } from "./bunnyStorage";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -126,6 +127,36 @@ export const appRouter = router({
       .query(async ({ ctx }) => {
         if (!ctx.user) return null;
         return await getAdAccountSettings(ctx.user.openId);
+      }),
+
+    // Upload media to Bunny.net CDN
+    uploadToBunny: protectedProcedure
+      .input(z.object({
+        fileName: z.string(),
+        base64Data: z.string(),
+        contentType: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        // Use username from context or default
+        const username = ctx.user?.name || "default";
+        const result = await uploadToBunny(
+          input.fileName,
+          input.base64Data,
+          input.contentType || "image/jpeg",
+          username
+        );
+        if (!result.success) {
+          throw new Error(result.error || "Upload failed");
+        }
+        return { cdnUrl: result.cdnUrl, path: result.path };
+      }),
+
+    // Delete media from Bunny.net CDN
+    deleteFromBunny: protectedProcedure
+      .input(z.object({ filePath: z.string() }))
+      .mutation(async ({ input }) => {
+        const success = await deleteFromBunny(input.filePath);
+        return { success };
       }),
 
     // Get ad accounts for the user
