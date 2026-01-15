@@ -159,6 +159,11 @@ export default function Home() {
     SHOW_INACTIVE_ADSETS: 'meta_ads_show_inactive_adsets',
     SHOW_INACTIVE_ADS: 'meta_ads_show_inactive_ads',
     MEDIA_POOL: 'meta_ads_media_pool',
+    CAMPAIGN_SEARCH: 'meta_ads_campaign_search',
+    ADSET_SEARCH: 'meta_ads_adset_search',
+    AD_SEARCH: 'meta_ads_ad_search',
+    ADSETS_PREVIEW: 'meta_ads_adsets_preview',
+    SHOW_PREVIEW: 'meta_ads_show_preview',
   };
 
   // Helper to get from localStorage
@@ -199,10 +204,10 @@ export default function Home() {
   const [selectedAdSet, setSelectedAdSet] = useState(() => getLS(LS_KEYS.SELECTED_ADSET, ""));
   const [selectedAd, setSelectedAd] = useState(() => getLS(LS_KEYS.SELECTED_AD, ""));
 
-  // Search filters
-  const [campaignSearch, setCampaignSearch] = useState("");
-  const [adSetSearch, setAdSetSearch] = useState("");
-  const [adSearch, setAdSearch] = useState("");
+  // Search filters - initialize from localStorage
+  const [campaignSearch, setCampaignSearch] = useState(() => getLS(LS_KEYS.CAMPAIGN_SEARCH, ""));
+  const [adSetSearch, setAdSetSearch] = useState(() => getLS(LS_KEYS.ADSET_SEARCH, ""));
+  const [adSearch, setAdSearch] = useState(() => getLS(LS_KEYS.AD_SEARCH, ""));
 
   // Show inactive toggles - initialize from localStorage
   const [showInactiveCampaigns, setShowInactiveCampaigns] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, false));
@@ -237,10 +242,10 @@ export default function Home() {
   // Distribution settings (Step 3) - initialize from localStorage
   const [numAdSets, setNumAdSets] = useState(() => getLS(LS_KEYS.NUM_ADSETS, 1));
   const [adsPerAdSet, setAdsPerAdSet] = useState(() => getLS(LS_KEYS.ADS_PER_ADSET, 5));
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreview, setShowPreview] = useState(() => getLS(LS_KEYS.SHOW_PREVIEW, false));
 
-  // Ad Sets for preview (Step 4)
-  const [adSetsPreview, setAdSetsPreview] = useState<AdSetData[]>([]);
+  // Ad Sets for preview (Step 4) - initialize from localStorage
+  const [adSetsPreview, setAdSetsPreview] = useState<AdSetData[]>(() => getLS(LS_KEYS.ADSETS_PREVIEW, []));
 
   // Global schedule settings - pre-filled with tomorrow 00:05
   const [globalScheduleEnabled, setGlobalScheduleEnabled] = useState(false);
@@ -358,6 +363,11 @@ export default function Home() {
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, showInactiveCampaigns); }, [showInactiveCampaigns]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADSETS, showInactiveAdSets); }, [showInactiveAdSets]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADS, showInactiveAds); }, [showInactiveAds]);
+  useEffect(() => { setLS(LS_KEYS.CAMPAIGN_SEARCH, campaignSearch); }, [campaignSearch]);
+  useEffect(() => { setLS(LS_KEYS.ADSET_SEARCH, adSetSearch); }, [adSetSearch]);
+  useEffect(() => { setLS(LS_KEYS.AD_SEARCH, adSearch); }, [adSearch]);
+  useEffect(() => { setLS(LS_KEYS.SHOW_PREVIEW, showPreview); }, [showPreview]);
+  useEffect(() => { setLS(LS_KEYS.ADSETS_PREVIEW, adSetsPreview); }, [adSetsPreview]);
   
   // Save media pool to localStorage (only save CDN URLs, not base64)
   useEffect(() => {
@@ -753,7 +763,8 @@ export default function Home() {
 
         addProgressLog(`  → Preparing ${adSet.ads.length} ad(s)...`);
         
-        const adsToCreate = adSet.ads.map((ad) => {
+        // Prepare ads with media - need to handle both base64 and CDN URLs
+        const adsToCreate = await Promise.all(adSet.ads.map(async (ad) => {
           let primaryText = "";
           if (adSet.mediaType === "image" || adSet.mediaType === "mixed") {
             primaryText = combineHookAndBody(ad.hook, adSet.sharedBody);
@@ -761,19 +772,48 @@ export default function Home() {
             primaryText = ad.primaryText;
           }
 
+          // Process media - fetch from CDN if needed
+          const processedMedia = await Promise.all(ad.media.map(async (m) => {
+            let base64Data = "";
+            
+            // If we have base64 data, use it
+            if (m.base64 && m.base64.length > 100) {
+              base64Data = m.base64.split(",")[1] || m.base64;
+            } 
+            // If we have CDN URL, fetch and convert to base64
+            else if (m.cdnUrl) {
+              try {
+                const response = await fetch(m.cdnUrl);
+                const blob = await response.blob();
+                const reader = new FileReader();
+                base64Data = await new Promise<string>((resolve) => {
+                  reader.onloadend = () => {
+                    const result = reader.result as string;
+                    resolve(result.split(",")[1] || result);
+                  };
+                  reader.readAsDataURL(blob);
+                });
+              } catch (e) {
+                console.error("Failed to fetch media from CDN:", e);
+              }
+            }
+            
+            return {
+              filename: m.name,
+              base64: base64Data,
+              type: m.type,
+              aspectRatio: m.aspectRatio,
+            };
+          }));
+
           return {
             adName: ad.adName,
             primaryText,
             headline: adSet.sharedHeadline,
             url: adSet.sharedUrl,
-            media: ad.media.map((m) => ({
-              filename: m.name,
-              base64: m.base64.split(",")[1] || m.base64,
-              type: m.type,
-              aspectRatio: m.aspectRatio,
-            })),
+            media: processedMedia,
           };
-        });
+        }));
 
         addProgressLog(`  → Uploading media and creating ads via Meta API...`);
         

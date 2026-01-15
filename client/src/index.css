@@ -149,6 +149,7 @@
    */
   .container {
     width: 100%;
+    max-width: 960px; /* Fixed content width */
     margin-left: auto;
     margin-right: auto;
     padding-left: 1rem; /* 16px - mobile padding */
@@ -171,7 +172,6 @@
     .container {
       padding-left: 2rem; /* 32px - desktop padding */
       padding-right: 2rem;
-      max-width: 960px; /* Reduced content width (25% smaller) */
     }
   }
 }

@@ -315,3 +315,22 @@
 
 ### UI Width Issue
 - [x] Lățimea site-ului e setată la 960px în cod (trebuie Publish pentru a se aplica pe live)
+
+
+## Bug Fix - Round 14
+
+#### Upload Media Bug
+- [x] Fix: "No media was uploaded" - imaginea se descarcă de pe CDN și se convertește la base64
+- [x] Investigare de ce media nu ajunge la Meta API - era din cauza că CDN URL nu avea base64
+
+### UI Fixes
+- [x] Fix: Lățimea site-ului fixă la 960px (max-width aplicat global)
+- [x] Salvare search text în localStorage pentru campaigns/adsets/ads
+- [ ] Scroll automat la item-ul selectat în liste (TODO)
+
+### localStorage Persistence
+- [x] Salvare Step 3 Preview în localStorage (adsets, ads, texte, schedule)
+- [x] Salvare showPreview state
+
+### Warnings
+- [ ] Fix: Warning Missing Description for DialogContent (TODO)
