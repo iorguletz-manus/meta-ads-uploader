@@ -147,7 +147,7 @@
    * For custom widths, use max-w-* utilities directly:
    * <div className="max-w-6xl mx-auto px-4">...</div>
    */
-  .container {
+  .app-container {
     width: 100%;
     max-width: 960px; /* Fixed content width */
     margin-left: auto;
@@ -162,14 +162,14 @@
   }
 
   @media (min-width: 640px) {
-    .container {
+    .app-container {
       padding-left: 1.5rem; /* 24px - tablet padding */
       padding-right: 1.5rem;
     }
   }
 
   @media (min-width: 1024px) {
-    .container {
+    .app-container {
       padding-left: 2rem; /* 32px - desktop padding */
       padding-right: 2rem;
     }

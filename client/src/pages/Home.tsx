@@ -27,7 +27,7 @@ import {
   Play,
   AlignLeft,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 // Types
@@ -258,6 +258,11 @@ export default function Home() {
   const [progressPercent, setProgressPercent] = useState(0);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
 
+  // Refs for scroll to selected item
+  const campaignRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const adSetRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const adRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+
   // Query for saved Facebook token
   const savedTokenQuery = trpc.meta.getSavedToken.useQuery(undefined, {
     enabled: !!user && !fbConnected,
@@ -363,6 +368,8 @@ export default function Home() {
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, showInactiveCampaigns); }, [showInactiveCampaigns]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADSETS, showInactiveAdSets); }, [showInactiveAdSets]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADS, showInactiveAds); }, [showInactiveAds]);
+
+
   useEffect(() => { setLS(LS_KEYS.CAMPAIGN_SEARCH, campaignSearch); }, [campaignSearch]);
   useEffect(() => { setLS(LS_KEYS.ADSET_SEARCH, adSetSearch); }, [adSetSearch]);
   useEffect(() => { setLS(LS_KEYS.AD_SEARCH, adSearch); }, [adSearch]);
@@ -1001,6 +1008,31 @@ export default function Home() {
 
   const totalAdsInPreview = adSetsPreview.reduce((sum, as) => sum + as.ads.length, 0);
 
+  // Scroll to selected items after data loads
+  useEffect(() => {
+    if (selectedCampaign && campaignRefs.current[selectedCampaign]) {
+      setTimeout(() => {
+        campaignRefs.current[selectedCampaign]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
+  }, [selectedCampaign, campaigns]);
+
+  useEffect(() => {
+    if (selectedAdSet && adSetRefs.current[selectedAdSet]) {
+      setTimeout(() => {
+        adSetRefs.current[selectedAdSet]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
+  }, [selectedAdSet, adSets]);
+
+  useEffect(() => {
+    if (selectedAd && adRefs.current[selectedAd]) {
+      setTimeout(() => {
+        adRefs.current[selectedAd]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
+  }, [selectedAd, ads]);
+
   // Loading state
   if (authLoading) {
     return (
@@ -1020,7 +1052,7 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
       <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container flex items-center justify-between h-12">
+        <div className="app-container flex items-center justify-between h-12">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
               <Upload className="h-3.5 w-3.5 text-white" />
@@ -1089,7 +1121,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="container py-4 space-y-4">
+      <main className="app-container py-4 space-y-4">
         {/* Step 1: Select Template Ad */}
         <Card>
           <CardHeader className="py-2 px-4">
@@ -1143,6 +1175,7 @@ export default function Home() {
                         campaigns.map((c) => (
                           <button
                             key={c.id}
+                            ref={(el) => { campaignRefs.current[c.id] = el; }}
                             onClick={() => {
                               setSelectedCampaign(c.id);
                               setSelectedAdSet("");
@@ -1202,6 +1235,7 @@ export default function Home() {
                         adSets.map((a) => (
                           <button
                             key={a.id}
+                            ref={(el) => { adSetRefs.current[a.id] = el; }}
                             onClick={() => {
                               setSelectedAdSet(a.id);
                               setSelectedAd("");
@@ -1260,6 +1294,7 @@ export default function Home() {
                         ads.map((a) => (
                           <button
                             key={a.id}
+                            ref={(el) => { adRefs.current[a.id] = el; }}
                             onClick={() => setSelectedAd(a.id)}
                             className={`w-full text-left px-1.5 py-1 rounded text-xs transition-colors flex items-center gap-1.5 ${
                               selectedAd === a.id 

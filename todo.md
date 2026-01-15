@@ -334,3 +334,11 @@
 
 ### Warnings
 - [ ] Fix: Warning Missing Description for DialogContent (TODO)
+
+
+## Bug Fix - Round 15
+
+### UI Bugs
+- [x] Fix: Lățime fixă 960px - redenumit clasa din .container în .app-container pentru a evita conflictul cu Tailwind CSS 4
+- [x] Fix: Scroll automat la item selectat - adăugat refs și useEffect pentru campaigns, adSets, ads
+- [ ] Fix: Warning Missing Description for DialogContent
