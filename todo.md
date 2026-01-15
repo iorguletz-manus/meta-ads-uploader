@@ -363,4 +363,5 @@
     - 4d: Create creative - all params
     - 4e: Create ad - all params
   - STEP 5: Final summary - success/failed count
-- [ ] Fix eroare "Invalid parameter" - așteptăm log-urile pentru a identifica cauza
+- [x] Creat pagină Privacy Policy pentru Meta App Review (/privacy-policy)
+- [ ] Fix eroare "Invalid parameter" - aplicația Facebook trebuie trecută din Development Mode în Live Mode

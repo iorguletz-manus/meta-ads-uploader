@@ -2,10 +2,12 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
+import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 function AuthenticatedApp() {
   const { data: user, isLoading, refetch } = trpc.auth.me.useQuery();
@@ -31,7 +33,13 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <AuthenticatedApp />
+          <Switch>
+            <Route path="/privacy-policy" component={PrivacyPolicy} />
+            <Route path="/privacy" component={PrivacyPolicy} />
+            <Route path="/">
+              <AuthenticatedApp />
+            </Route>
+          </Switch>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

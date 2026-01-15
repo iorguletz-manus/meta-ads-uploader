@@ -693,14 +693,19 @@ export const appRouter = router({
         })),
       }))
       .mutation(async ({ input }) => {
-        console.log("\n" + "*".repeat(120));
-        console.log("[STEP 0] ******** BATCH CREATE ADS - STARTING ********");
-        console.log("[STEP 0] Template Ad ID:", input.templateAdId);
-        console.log("[STEP 0] New Ad Set Name:", input.newAdSetName);
-        console.log("[STEP 0] Scheduled Time:", input.scheduledTime || "Not scheduled");
-        console.log("[STEP 0] Number of ads to create:", input.ads.length);
-        console.log("[STEP 0] Access Token (first 20 chars):", input.accessToken?.substring(0, 20) + "...");
-        console.log("*".repeat(120));
+        // Collect logs for frontend debugging
+        const serverLogs: string[] = [];
+        const log = (message: string) => { console.log(message); serverLogs.push(message); };
+        const logError = (message: string) => { console.error(message); serverLogs.push(`[ERROR] ${message}`); };
+        
+        log("\n" + "*".repeat(120));
+        log("[STEP 0] ******** BATCH CREATE ADS - STARTING ********");
+        log("[STEP 0] Template Ad ID: " + input.templateAdId);
+        log("[STEP 0] New Ad Set Name: " + input.newAdSetName);
+        log("[STEP 0] Scheduled Time: " + (input.scheduledTime || "Not scheduled"));
+        log("[STEP 0] Number of ads to create: " + input.ads.length);
+        log("[STEP 0] Access Token (first 20 chars): " + input.accessToken?.substring(0, 20) + "...");
+        log("*".repeat(120));
         
         // STEP 1: Get template info
         console.log("\n[STEP 1] ======== GETTING TEMPLATE AD INFO ========");
