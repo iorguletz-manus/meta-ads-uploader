@@ -783,15 +783,32 @@ export const appRouter = router({
         
         for (const ad of input.ads) {
           try {
+            console.log("\n" + "=".repeat(60));
+            console.log(`[BATCH] Processing ad: ${ad.adName}`);
+            console.log(`[BATCH] Media count: ${ad.media.length}`);
+            ad.media.forEach((m, i) => {
+              console.log(`[BATCH] Media ${i + 1}: ${m.filename} (${m.type}, ${m.aspectRatio})`);
+              console.log(`[BATCH]   base64 length: ${m.base64?.length || 0}`);
+              if (m.base64) {
+                console.log(`[BATCH]   base64 preview: ${m.base64.substring(0, 50)}...`);
+              }
+            });
+            
             // Separate images and videos
             const images = ad.media.filter(m => m.type === "image");
             const videos = ad.media.filter(m => m.type === "video");
             
+            console.log(`[BATCH] Images: ${images.length}, Videos: ${videos.length}`);
+            
             // Upload images
             const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
             for (const image of images) {
-              if (!image.base64) continue;
+              if (!image.base64) {
+                console.log(`[BATCH] Skipping image ${image.filename} - no base64 data`);
+                continue;
+              }
               
+              console.log(`[BATCH] Uploading image: ${image.filename}`);
               const imageFormData = new URLSearchParams();
               imageFormData.append("bytes", image.base64);
               imageFormData.append("name", image.filename);
@@ -806,12 +823,20 @@ export const appRouter = router({
               );
               
               if (!imageResponse.ok) {
-                const error = await imageResponse.json();
+                const errorText = await imageResponse.text();
+                console.error(`[BATCH] Image upload failed: ${errorText}`);
+                let error;
+                try {
+                  error = JSON.parse(errorText);
+                } catch {
+                  error = { error: { message: errorText } };
+                }
                 throw new Error(`Failed to upload image: ${error.error?.message || "Unknown error"}`);
               }
               
               const imageResult = await imageResponse.json();
               const imageKey = Object.keys(imageResult.images)[0];
+              console.log(`[BATCH] Image uploaded successfully: hash=${imageResult.images[imageKey].hash}`);
               uploadedImages.push({
                 hash: imageResult.images[imageKey].hash,
                 aspectRatio: image.aspectRatio,
@@ -852,6 +877,8 @@ export const appRouter = router({
             }
             
             if (uploadedImages.length === 0 && uploadedVideos.length === 0) {
+              console.error(`[BATCH] ERROR: No media was uploaded for ad ${ad.adName}`);
+              console.error(`[BATCH] Images attempted: ${images.length}, Videos attempted: ${videos.length}`);
               throw new Error("No media was uploaded");
             }
             

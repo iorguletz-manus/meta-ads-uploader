@@ -780,18 +780,27 @@ export default function Home() {
           }
 
           // Process media - fetch from CDN if needed
+          console.log(`[Media Processing] Ad: ${ad.adName}, Media count: ${ad.media.length}`);
           const processedMedia = await Promise.all(ad.media.map(async (m) => {
             let base64Data = "";
+            
+            console.log(`[Media Processing] Processing: ${m.name}`);
+            console.log(`[Media Processing]   - base64 length: ${m.base64?.length || 0}`);
+            console.log(`[Media Processing]   - cdnUrl: ${m.cdnUrl || 'none'}`);
             
             // If we have base64 data, use it
             if (m.base64 && m.base64.length > 100) {
               base64Data = m.base64.split(",")[1] || m.base64;
+              console.log(`[Media Processing]   - Using existing base64 (length: ${base64Data.length})`);
             } 
             // If we have CDN URL, fetch and convert to base64
             else if (m.cdnUrl) {
               try {
+                console.log(`[Media Processing]   - Fetching from CDN: ${m.cdnUrl}`);
                 const response = await fetch(m.cdnUrl);
+                console.log(`[Media Processing]   - Fetch response status: ${response.status}`);
                 const blob = await response.blob();
+                console.log(`[Media Processing]   - Blob size: ${blob.size}`);
                 const reader = new FileReader();
                 base64Data = await new Promise<string>((resolve) => {
                   reader.onloadend = () => {
@@ -800,9 +809,12 @@ export default function Home() {
                   };
                   reader.readAsDataURL(blob);
                 });
+                console.log(`[Media Processing]   - Converted to base64 (length: ${base64Data.length})`);
               } catch (e) {
                 console.error("Failed to fetch media from CDN:", e);
               }
+            } else {
+              console.error(`[Media Processing]   - ERROR: No base64 and no CDN URL!`);
             }
             
             return {
