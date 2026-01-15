@@ -82,15 +82,22 @@ export const appRouter = router({
       .input(z.object({ accessToken: z.string(), expiresIn: z.number() }))
       .mutation(async ({ input, ctx }) => {
         if (!ctx.user) throw new Error("Not authenticated");
+        console.log("[saveFacebookToken] Saving token for openId:", ctx.user.openId);
         await saveFacebookToken(ctx.user.openId, input.accessToken, input.expiresIn);
+        console.log("[saveFacebookToken] Token saved successfully");
         return { success: true };
       }),
 
     // Get saved Facebook token from database
     getSavedToken: protectedProcedure
       .query(async ({ ctx }) => {
-        if (!ctx.user) return null;
+        if (!ctx.user) {
+          console.log("[getSavedToken] No user in context");
+          return null;
+        }
+        console.log("[getSavedToken] Getting token for openId:", ctx.user.openId);
         const token = await getFacebookToken(ctx.user.openId);
+        console.log("[getSavedToken] Token found:", token ? "yes" : "no");
         return token;
       }),
 

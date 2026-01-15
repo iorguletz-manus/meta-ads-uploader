@@ -801,7 +801,7 @@ export default function Home() {
                       />
                     </div>
                   </div>
-                  <ScrollArea className="flex-1">
+                  <ScrollArea className="flex-1 overflow-auto">
                     <div className="p-1">
                       {campaignsQuery.isLoading ? (
                         <div className="flex items-center justify-center py-4">
@@ -858,7 +858,7 @@ export default function Home() {
                       />
                     </div>
                   </div>
-                  <ScrollArea className="flex-1">
+                  <ScrollArea className="flex-1 overflow-auto">
                     <div className="p-1">
                       {!selectedCampaign ? (
                         <p className="text-xs text-muted-foreground text-center py-4">Select a campaign</p>
@@ -916,7 +916,7 @@ export default function Home() {
                       />
                     </div>
                   </div>
-                  <ScrollArea className="flex-1">
+                  <ScrollArea className="flex-1 overflow-auto">
                     <div className="p-1">
                       {!selectedAdSet ? (
                         <p className="text-xs text-muted-foreground text-center py-4">Select an ad set</p>

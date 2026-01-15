@@ -203,3 +203,14 @@
 ### Bug Fixes
 - [x] Fix: Facebook connection nu rămâne conectat la refresh (era deja implementat)
 - [x] Fix: Ad Account selectat persistă acum în baza de date la nivel de user
+
+
+## Bug Fix - Facebook Token Persistence
+
+- [ ] Fix: Facebook token nu rămâne conectat la refresh (trebuie investigat de ce nu funcționează auto-reconnect)
+
+
+## Bug Fix - Round 5
+
+- [x] Ștergere cont facturi4 din baza de date (nu se folosește)
+- [x] Fix scroll vertical în containere campaigns/adsets/ads (scrollbar vizibil mereu)
