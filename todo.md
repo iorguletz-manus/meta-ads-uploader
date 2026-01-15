@@ -116,3 +116,52 @@
 - [x] Create backend procedure to get saved Facebook token
 - [x] Update frontend to check for saved token on load
 - [x] Auto-connect Facebook if valid token exists in DB
+
+
+## Major UI Restructure - 4 Steps Flow
+
+### Step 1 - Select Template Ad
+- [x] Keep current 3-column layout (unchanged)
+
+### Step 2 - Upload Media (Images / Videos)
+- [x] Rename to "Upload Media (Images / Videos)"
+- [x] Drag & drop zone for images and videos
+
+### Step 3 - Establish Nr of Adsets
+- [x] Rename to "Establish Nr of Adsets"
+- [x] Input for number of Ad Sets
+- [x] Input for Ads per Ad Set
+- [x] "Distribute" button that reveals Step 4
+
+### Step 4 - Preview (hidden until Distribute is clicked)
+- [x] Show only after clicking Distribute
+- [x] One card per Ad Set (Adset 1, Adset 2, etc.)
+- [x] Media preview on right side (images 200-300px, videos min 1280x720)
+
+### Image Ads Card Layout
+- [x] Adset Name: INPUT
+- [x] For each ad: AD NAME (input) + HOOK (textarea 225px height)
+- [x] Single BODY textarea (485px height) - shared for all ads
+- [x] Single HEADLINE input - shared for all ads
+- [x] Single URL input - shared for all ads
+- [x] Combine HOOK + BODY into Primary Text when creating ad
+
+### Video Ads Card Layout
+- [x] AD NAME: INPUT
+- [x] PRIMARY TEXT: TEXTAREA (100px height)
+- [x] Single HEADLINE input - shared
+- [x] Single URL input - shared
+
+### Other Requirements
+- [x] Do NOT copy primary text from template ad to inputs
+- [x] Textarea should be resizable if content exceeds default height
+
+
+## Google Drive Integration
+- [ ] Add Google Drive OAuth connection
+- [ ] Save Google Drive token to database (like Facebook token)
+- [ ] Auto-connect Google Drive if valid token exists
+- [ ] Add "Import from Google Drive" button in Upload Media step
+- [ ] Google Drive Picker to select files
+- [ ] Download selected files from Drive and add to pool
+- [ ] Support images and videos from Drive
