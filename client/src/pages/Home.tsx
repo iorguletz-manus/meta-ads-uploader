@@ -30,6 +30,62 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+// Google API constants
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+
+// Load Google API scripts
+let googleApiLoaded = false;
+let googlePickerLoaded = false;
+
+const loadGoogleApi = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (googleApiLoaded) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://apis.google.com/js/api.js';
+    script.onload = () => {
+      googleApiLoaded = true;
+      resolve();
+    };
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+};
+
+const loadGoogleIdentity = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if ((window as any).google?.accounts) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.onload = () => resolve();
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+};
+
+const loadGooglePicker = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (googlePickerLoaded) {
+      resolve();
+      return;
+    }
+    (window as any).gapi.load('picker', {
+      callback: () => {
+        googlePickerLoaded = true;
+        resolve();
+      },
+      onerror: reject,
+    });
+  });
+};
+
 // Types
 interface MediaFile {
   id: string;
@@ -449,9 +505,123 @@ export default function Home() {
     window.location.href = authUrl;
   };
 
-  // Google Drive Connect (placeholder)
-  const handleGoogleDriveConnect = () => {
-    toast.info("Google Drive integration coming soon!");
+  // Google Drive state for picker
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [isLoadingGoogleDrive, setIsLoadingGoogleDrive] = useState(false);
+
+  // Google Drive Connect - opens picker
+  const handleGoogleDriveConnect = async () => {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
+      toast.error("Google API credentials not configured");
+      return;
+    }
+
+    setIsLoadingGoogleDrive(true);
+    try {
+      // Load Google APIs
+      await loadGoogleApi();
+      await loadGoogleIdentity();
+      await loadGooglePicker();
+
+      // Get access token via Google Identity Services
+      const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: GOOGLE_SCOPES,
+        callback: async (response: any) => {
+          if (response.access_token) {
+            setGoogleAccessToken(response.access_token);
+            // Open picker with the token
+            openGooglePicker(response.access_token);
+          } else {
+            toast.error("Failed to get Google access token");
+            setIsLoadingGoogleDrive(false);
+          }
+        },
+      });
+
+      // Request access token
+      if (googleAccessToken) {
+        // Already have token, just open picker
+        openGooglePicker(googleAccessToken);
+      } else {
+        tokenClient.requestAccessToken({ prompt: '' });
+      }
+    } catch (error) {
+      console.error("Google Drive error:", error);
+      toast.error("Failed to connect to Google Drive");
+      setIsLoadingGoogleDrive(false);
+    }
+  };
+
+  // Open Google Picker
+  const openGooglePicker = (accessToken: string) => {
+    const google = (window as any).google;
+    
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setIncludeFolders(true)
+      .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
+    
+    const picker = new google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(accessToken)
+      .setDeveloperKey(GOOGLE_API_KEY)
+      .setCallback((data: any) => handlePickerCallback(data, accessToken))
+      .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+      .setTitle('Select Images or Videos')
+      .build();
+    
+    picker.setVisible(true);
+    setIsLoadingGoogleDrive(false);
+  };
+
+  // Handle picker selection
+  const handlePickerCallback = async (data: any, accessToken: string) => {
+    const google = (window as any).google;
+    
+    if (data.action === google.picker.Action.PICKED) {
+      const files = data.docs;
+      toast.info(`Downloading ${files.length} file(s) from Google Drive...`);
+      
+      for (const file of files) {
+        try {
+          // Download file from Google Drive
+          const response = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
+          
+          if (!response.ok) {
+            throw new Error(`Failed to download ${file.name}`);
+          }
+          
+          const blob = await response.blob();
+          const fileObj = new File([blob], file.name, { type: file.mimeType });
+          
+          // Process the file like a regular upload
+          await processUploadedFile(fileObj);
+          
+        } catch (error) {
+          console.error(`Error downloading ${file.name}:`, error);
+          toast.error(`Failed to download ${file.name}`);
+        }
+      }
+      
+      toast.success(`Successfully imported ${files.length} file(s) from Google Drive`);
+    } else if (data.action === google.picker.Action.CANCEL) {
+      // User cancelled
+    }
+  };
+
+  // Process uploaded file from Google Drive - reuses handleFileUpload
+  const processUploadedFile = async (file: File) => {
+    // Create a FileList-like object with single file
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    await handleFileUpload(dataTransfer.files);
   };
 
   // Compress image to reduce size

@@ -365,3 +365,11 @@
   - STEP 5: Final summary - success/failed count
 - [x] Creat pagină Privacy Policy pentru Meta App Review (/privacy-policy)
 - [ ] Fix eroare "Invalid parameter" - aplicația Facebook trebuie trecută din Development Mode în Live Mode
+
+
+## Google Drive Integration - Round 17
+
+- [x] Configurare ENV cu Google credentials (VITE_GOOGLE_CLIENT_ID, VITE_GOOGLE_API_KEY, GOOGLE_CLIENT_SECRET)
+- [x] Implementare Google Picker pentru selectare fișiere din Drive
+- [x] Download fișiere selectate și adăugare în media pool
+- [ ] Salvare Google token în DB pentru auto-reconnect (opțional - tokenul se păstrează în sesiune)
