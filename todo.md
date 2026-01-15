@@ -295,3 +295,12 @@
 - [x] Structură foldere: meta-ads-uploader/username/year/month/day/filename-timestamp.ext
 - [x] Upload imagini la Bunny.net când se adaugă în media pool
 - [x] localStorage salvează doar CDN URLs (nu base64)
+
+
+## Cerințe Noi - Round 12
+
+### UI Improvements
+- [x] Redus lățimea site-ului cu 25% (de la 1280px la 960px)
+
+### Debugging
+- [x] Adăugat logging complet și detaliat pentru createSingleAd (upload imagine, creare creative, creare ad)

@@ -171,7 +171,7 @@
     .container {
       padding-left: 2rem; /* 32px - desktop padding */
       padding-right: 2rem;
-      max-width: 1280px; /* Standard content width */
+      max-width: 960px; /* Reduced content width (25% smaller) */
     }
   }
 }

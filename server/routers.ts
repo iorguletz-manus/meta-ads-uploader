@@ -427,15 +427,40 @@ export const appRouter = router({
         })),
       }))
       .mutation(async ({ input }) => {
+        console.log("\n" + "=".repeat(80));
+        console.log("[CREATE SINGLE AD] Starting...");
+        console.log("=".repeat(80));
+        console.log("[INPUT] Ad Account ID:", input.adAccountId);
+        console.log("[INPUT] Ad Set ID:", input.adSetId);
+        console.log("[INPUT] Page ID:", input.pageId);
+        console.log("[INPUT] Ad Name:", input.adName);
+        console.log("[INPUT] Primary Text:", input.primaryText.substring(0, 100) + "...");
+        console.log("[INPUT] Headline:", input.headline);
+        console.log("[INPUT] URL:", input.url);
+        console.log("[INPUT] Images count:", input.images.length);
+        input.images.forEach((img, i) => {
+          console.log(`[INPUT] Image ${i + 1}: ${img.filename} (${img.aspectRatio}) - base64 length: ${img.base64?.length || 0}`);
+        });
+        
         // Step 1: Upload all images
+        console.log("\n[STEP 1] Uploading images to Meta...");
         const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
         
         for (const image of input.images) {
-          if (!image.base64) continue;
+          if (!image.base64) {
+            console.log(`[STEP 1] Skipping image ${image.filename} - no base64 data`);
+            continue;
+          }
           
+          console.log(`[STEP 1] Uploading image: ${image.filename}...`);
           const imageFormData = new URLSearchParams();
-          imageFormData.append("bytes", image.base64);
+          // Remove data URL prefix if present
+          const base64Data = image.base64.includes(',') ? image.base64.split(',')[1] : image.base64;
+          imageFormData.append("bytes", base64Data);
           imageFormData.append("name", image.filename);
+          
+          const imageUrl = `${META_API_BASE}/${input.adAccountId}/adimages?access_token=${input.accessToken.substring(0, 20)}...`;
+          console.log(`[STEP 1] POST ${imageUrl}`);
           
           const imageResponse = await fetch(
             `${META_API_BASE}/${input.adAccountId}/adimages?access_token=${input.accessToken}`,
@@ -446,20 +471,34 @@ export const appRouter = router({
             }
           );
           
+          const imageResponseText = await imageResponse.text();
+          console.log(`[STEP 1] Response status: ${imageResponse.status}`);
+          console.log(`[STEP 1] Response body: ${imageResponseText.substring(0, 500)}`);
+          
           if (!imageResponse.ok) {
-            const error = await imageResponse.json();
+            let error;
+            try {
+              error = JSON.parse(imageResponseText);
+            } catch {
+              error = { error: { message: imageResponseText } };
+            }
+            console.error(`[STEP 1] ERROR uploading image:`, error);
             throw new Error(`Failed to upload image ${image.filename}: ${error.error?.message || "Unknown error"}`);
           }
           
-          const imageResult = await imageResponse.json();
+          const imageResult = JSON.parse(imageResponseText);
           const imageKey = Object.keys(imageResult.images)[0];
+          console.log(`[STEP 1] SUCCESS - Image hash: ${imageResult.images[imageKey].hash}`);
           uploadedImages.push({
             hash: imageResult.images[imageKey].hash,
             aspectRatio: image.aspectRatio,
           });
         }
         
+        console.log(`[STEP 1] Total images uploaded: ${uploadedImages.length}`);
+        
         if (uploadedImages.length === 0) {
+          console.error("[STEP 1] ERROR: No images were uploaded!");
           throw new Error("No images were uploaded");
         }
         
@@ -485,6 +524,28 @@ export const appRouter = router({
         // Otherwise, use simple object_story_spec
         let creativeData: Record<string, string>;
         
+        console.log("\n[STEP 2] Creating ad creative...");
+        
+        // Build object_story_spec with proper call_to_action structure
+        const objectStorySpec = {
+          page_id: input.pageId,
+          link_data: {
+            message: input.primaryText,
+            name: input.headline,
+            link: input.url,
+            image_hash: uploadedImages[0].hash,
+            call_to_action: {
+              type: "LEARN_MORE",
+              value: {
+                link: input.url, // Must match the link above
+              },
+            },
+          },
+        };
+        
+        console.log("[STEP 2] object_story_spec:");
+        console.log(JSON.stringify(objectStorySpec, null, 2));
+        
         if (uploadedImages.length > 1) {
           // Multiple images - use asset feed spec for placement customization
           const assetFeedSpec = {
@@ -497,44 +558,36 @@ export const appRouter = router({
             ad_formats: ["SINGLE_IMAGE"],
           };
           
+          console.log("[STEP 2] Using asset_feed_spec for multiple images:");
+          console.log(JSON.stringify(assetFeedSpec, null, 2));
+          
           creativeData = {
             name: `${input.adName}_creative`,
-            object_story_spec: JSON.stringify({
-              page_id: input.pageId,
-              link_data: {
-                message: input.primaryText,
-                name: input.headline,
-                link: input.url,
-                call_to_action: { type: "LEARN_MORE" },
-                image_hash: uploadedImages[0].hash,
-              },
-            }),
+            object_story_spec: JSON.stringify(objectStorySpec),
             asset_feed_spec: JSON.stringify(assetFeedSpec),
           };
         } else {
           // Single image - simple creative
+          console.log("[STEP 2] Using single image creative (no asset_feed_spec)");
           creativeData = {
             name: `${input.adName}_creative`,
-            object_story_spec: JSON.stringify({
-              page_id: input.pageId,
-              link_data: {
-                message: input.primaryText,
-                name: input.headline,
-                link: input.url,
-                call_to_action: { type: "LEARN_MORE" },
-                image_hash: uploadedImages[0].hash,
-              },
-            }),
+            object_story_spec: JSON.stringify(objectStorySpec),
           };
         }
+        
+        console.log("[STEP 2] Final creative data:");
+        console.log(JSON.stringify(creativeData, null, 2));
         
         const creativeFormData = new URLSearchParams();
         Object.entries(creativeData).forEach(([key, value]) => {
           creativeFormData.append(key, value);
         });
         
+        const creativeUrl = `${META_API_BASE}/${input.adAccountId}/adcreatives`;
+        console.log(`[STEP 2] POST ${creativeUrl}`);
+        
         const creativeResponse = await fetch(
-          `${META_API_BASE}/${input.adAccountId}/adcreatives?access_token=${input.accessToken}`,
+          `${creativeUrl}?access_token=${input.accessToken}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -542,14 +595,27 @@ export const appRouter = router({
           }
         );
         
+        const creativeResponseText = await creativeResponse.text();
+        console.log(`[STEP 2] Response status: ${creativeResponse.status}`);
+        console.log(`[STEP 2] Response body: ${creativeResponseText}`);
+        
         if (!creativeResponse.ok) {
-          const error = await creativeResponse.json();
+          let error;
+          try {
+            error = JSON.parse(creativeResponseText);
+          } catch {
+            error = { error: { message: creativeResponseText } };
+          }
+          console.error("[STEP 2] ERROR creating creative:");
+          console.error(JSON.stringify(error, null, 2));
           throw new Error(`Failed to create creative: ${error.error?.message || "Unknown error"}`);
         }
         
-        const newCreative = await creativeResponse.json();
+        const newCreative = JSON.parse(creativeResponseText);
+        console.log(`[STEP 2] SUCCESS - Creative ID: ${newCreative.id}`);
         
         // Step 3: Create the ad
+        console.log("\n[STEP 3] Creating ad...");
         const adData = {
           name: input.adName,
           adset_id: input.adSetId,
@@ -557,13 +623,19 @@ export const appRouter = router({
           status: "PAUSED",
         };
         
+        console.log("[STEP 3] Ad data:");
+        console.log(JSON.stringify(adData, null, 2));
+        
         const adFormData = new URLSearchParams();
         Object.entries(adData).forEach(([key, value]) => {
           adFormData.append(key, value);
         });
         
+        const adUrl = `${META_API_BASE}/${input.adAccountId}/ads`;
+        console.log(`[STEP 3] POST ${adUrl}`);
+        
         const adResponse = await fetch(
-          `${META_API_BASE}/${input.adAccountId}/ads?access_token=${input.accessToken}`,
+          `${adUrl}?access_token=${input.accessToken}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -571,12 +643,27 @@ export const appRouter = router({
           }
         );
         
+        const adResponseText = await adResponse.text();
+        console.log(`[STEP 3] Response status: ${adResponse.status}`);
+        console.log(`[STEP 3] Response body: ${adResponseText}`);
+        
         if (!adResponse.ok) {
-          const error = await adResponse.json();
+          let error;
+          try {
+            error = JSON.parse(adResponseText);
+          } catch {
+            error = { error: { message: adResponseText } };
+          }
+          console.error("[STEP 3] ERROR creating ad:");
+          console.error(JSON.stringify(error, null, 2));
           throw new Error(`Failed to create ad: ${error.error?.message || "Unknown error"}`);
         }
         
-        const newAd = await adResponse.json();
+        const newAd = JSON.parse(adResponseText);
+        console.log(`[STEP 3] SUCCESS - Ad ID: ${newAd.id}`);
+        console.log("=".repeat(80));
+        console.log("[CREATE SINGLE AD] COMPLETED SUCCESSFULLY!");
+        console.log("=".repeat(80) + "\n");
         
         return {
           success: true,
