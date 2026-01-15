@@ -322,15 +322,28 @@ export default function Home() {
 
   // When ad accounts load
   useEffect(() => {
+    console.log('[AdAccounts] Query status:', {
+      isLoading: adAccountsQuery.isLoading,
+      isError: adAccountsQuery.isError,
+      error: adAccountsQuery.error?.message,
+      dataLength: adAccountsQuery.data?.length,
+      fbConnected,
+      fbAccessToken: fbAccessToken ? 'present' : 'missing',
+    });
+    
     if (adAccountsQuery.data && adAccountsQuery.data.length > 0) {
+      console.log('[AdAccounts] Loaded', adAccountsQuery.data.length, 'accounts');
       setAllAdAccounts(adAccountsQuery.data as AdAccount[]);
       // Only show modal if no saved settings
       if (!adAccountSettingsQuery.data?.enabledAdAccountIds?.length) {
         setIsFirstConnect(true);
         setShowAdAccountModal(true);
       }
+    } else if (adAccountsQuery.isError) {
+      console.error('[AdAccounts] Error loading:', adAccountsQuery.error);
+      toast.error('Failed to load Ad Accounts: ' + (adAccountsQuery.error?.message || 'Unknown error'));
     }
-  }, [adAccountsQuery.data, adAccountSettingsQuery.data]);
+  }, [adAccountsQuery.data, adAccountsQuery.isLoading, adAccountsQuery.isError, adAccountSettingsQuery.data, fbConnected, fbAccessToken]);
 
   // Save to localStorage when values change
   useEffect(() => { setLS(LS_KEYS.FB_TOKEN, fbAccessToken); }, [fbAccessToken]);
@@ -996,6 +1009,26 @@ export default function Home() {
                     Select Ad Account
                   </Button>
                 )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-red-600 hover:text-red-800 hover:bg-red-50"
+                  onClick={() => {
+                    // Disconnect Facebook
+                    setFbConnected(false);
+                    setFbAccessToken(null);
+                    setAllAdAccounts([]);
+                    setEnabledAdAccounts([]);
+                    setSelectedAdAccount('');
+                    localStorage.removeItem(LS_KEYS.FB_TOKEN);
+                    localStorage.removeItem(LS_KEYS.FB_CONNECTED);
+                    localStorage.removeItem(LS_KEYS.SELECTED_AD_ACCOUNT);
+                    localStorage.removeItem(LS_KEYS.ENABLED_AD_ACCOUNTS);
+                    toast.success('Facebook disconnected');
+                  }}
+                >
+                  Disconnect
+                </Button>
                 <span className="flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-full text-xs">
                   <CheckCircle2 className="h-3 w-3" />
                   FB

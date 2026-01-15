@@ -304,3 +304,14 @@
 
 ### Debugging
 - [x] Adăugat logging complet și detaliat pentru createSingleAd (upload imagine, creare creative, creare ad)
+
+
+## Bug Fix URGENT - Round 13
+
+### Ad Accounts Issue
+- [x] Fix: Adăugat buton "Disconnect" pentru a putea reconecta Facebook
+- [x] Adăugat logging detaliat pentru debugging Ad Accounts query
+- [x] Afișare toast error când Ad Accounts nu se încarcă
+
+### UI Width Issue
+- [x] Lățimea site-ului e setată la 960px în cod (trebuie Publish pentru a se aplica pe live)
