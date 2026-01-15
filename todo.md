@@ -230,3 +230,14 @@
 
 ### New Features
 - [x] Progress logs live la Create cu progress bar și dialog
+
+
+## Cerințe Noi - Round 7
+
+### Persistență Date
+- [x] Implementare localStorage pentru a nu pierde datele la refresh
+- [x] Salvare: token Facebook, ad account selectat, campaign/adset/ad selectat, nr adsets, ads per adset, show inactive toggles
+
+### Bug Fixes
+- [x] Fix eroare "Invalid parameter" la creare creative - adăugat call_to_action.value.link
+- [x] Adăugat logging detaliat pentru debugging

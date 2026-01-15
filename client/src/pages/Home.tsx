@@ -142,41 +142,76 @@ export default function Home() {
     },
   });
 
-  // Facebook state
-  const [fbConnected, setFbConnected] = useState(false);
-  const [fbAccessToken, setFbAccessToken] = useState<string | null>(null);
+  // LocalStorage keys
+  const LS_KEYS = {
+    FB_TOKEN: 'meta_ads_fb_token',
+    FB_CONNECTED: 'meta_ads_fb_connected',
+    SELECTED_AD_ACCOUNT: 'meta_ads_selected_account',
+    ENABLED_AD_ACCOUNTS: 'meta_ads_enabled_accounts',
+    SELECTED_CAMPAIGN: 'meta_ads_selected_campaign',
+    SELECTED_ADSET: 'meta_ads_selected_adset',
+    SELECTED_AD: 'meta_ads_selected_ad',
+    NUM_ADSETS: 'meta_ads_num_adsets',
+    ADS_PER_ADSET: 'meta_ads_ads_per_adset',
+    SHOW_INACTIVE_CAMPAIGNS: 'meta_ads_show_inactive_campaigns',
+    SHOW_INACTIVE_ADSETS: 'meta_ads_show_inactive_adsets',
+    SHOW_INACTIVE_ADS: 'meta_ads_show_inactive_ads',
+  };
+
+  // Helper to get from localStorage
+  const getLS = <T,>(key: string, defaultValue: T): T => {
+    try {
+      const item = localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  };
+
+  // Helper to set to localStorage
+  const setLS = (key: string, value: unknown) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.error('Failed to save to localStorage:', e);
+    }
+  };
+
+  // Facebook state - initialize from localStorage
+  const [fbConnected, setFbConnected] = useState(() => getLS(LS_KEYS.FB_CONNECTED, false));
+  const [fbAccessToken, setFbAccessToken] = useState<string | null>(() => getLS(LS_KEYS.FB_TOKEN, null));
 
   // Google Drive state
   const [gdriveConnected, setGdriveConnected] = useState(false);
 
-  // Ad Account state
+  // Ad Account state - initialize from localStorage
   const [allAdAccounts, setAllAdAccounts] = useState<AdAccount[]>([]);
-  const [enabledAdAccounts, setEnabledAdAccounts] = useState<string[]>([]);
-  const [selectedAdAccount, setSelectedAdAccount] = useState("");
+  const [enabledAdAccounts, setEnabledAdAccounts] = useState<string[]>(() => getLS(LS_KEYS.ENABLED_AD_ACCOUNTS, []));
+  const [selectedAdAccount, setSelectedAdAccount] = useState(() => getLS(LS_KEYS.SELECTED_AD_ACCOUNT, ""));
   const [showAdAccountModal, setShowAdAccountModal] = useState(false);
   const [isFirstConnect, setIsFirstConnect] = useState(false);
 
-  // Selection state
-  const [selectedCampaign, setSelectedCampaign] = useState("");
-  const [selectedAdSet, setSelectedAdSet] = useState("");
-  const [selectedAd, setSelectedAd] = useState("");
+  // Selection state - initialize from localStorage
+  const [selectedCampaign, setSelectedCampaign] = useState(() => getLS(LS_KEYS.SELECTED_CAMPAIGN, ""));
+  const [selectedAdSet, setSelectedAdSet] = useState(() => getLS(LS_KEYS.SELECTED_ADSET, ""));
+  const [selectedAd, setSelectedAd] = useState(() => getLS(LS_KEYS.SELECTED_AD, ""));
 
   // Search filters
   const [campaignSearch, setCampaignSearch] = useState("");
   const [adSetSearch, setAdSetSearch] = useState("");
   const [adSearch, setAdSearch] = useState("");
 
-  // Show inactive toggles
-  const [showInactiveCampaigns, setShowInactiveCampaigns] = useState(false);
-  const [showInactiveAdSets, setShowInactiveAdSets] = useState(false);
-  const [showInactiveAds, setShowInactiveAds] = useState(false);
+  // Show inactive toggles - initialize from localStorage
+  const [showInactiveCampaigns, setShowInactiveCampaigns] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, false));
+  const [showInactiveAdSets, setShowInactiveAdSets] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADSETS, false));
+  const [showInactiveAds, setShowInactiveAds] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADS, false));
 
   // Media pool (Step 2)
   const [mediaPool, setMediaPool] = useState<MediaFile[]>([]);
 
-  // Distribution settings (Step 3)
-  const [numAdSets, setNumAdSets] = useState(1);
-  const [adsPerAdSet, setAdsPerAdSet] = useState(5);
+  // Distribution settings (Step 3) - initialize from localStorage
+  const [numAdSets, setNumAdSets] = useState(() => getLS(LS_KEYS.NUM_ADSETS, 1));
+  const [adsPerAdSet, setAdsPerAdSet] = useState(() => getLS(LS_KEYS.ADS_PER_ADSET, 5));
   const [showPreview, setShowPreview] = useState(false);
 
   // Ad Sets for preview (Step 4)
@@ -265,6 +300,20 @@ export default function Home() {
       }
     }
   }, [adAccountsQuery.data, adAccountSettingsQuery.data]);
+
+  // Save to localStorage when values change
+  useEffect(() => { setLS(LS_KEYS.FB_TOKEN, fbAccessToken); }, [fbAccessToken]);
+  useEffect(() => { setLS(LS_KEYS.FB_CONNECTED, fbConnected); }, [fbConnected]);
+  useEffect(() => { setLS(LS_KEYS.SELECTED_AD_ACCOUNT, selectedAdAccount); }, [selectedAdAccount]);
+  useEffect(() => { setLS(LS_KEYS.ENABLED_AD_ACCOUNTS, enabledAdAccounts); }, [enabledAdAccounts]);
+  useEffect(() => { setLS(LS_KEYS.SELECTED_CAMPAIGN, selectedCampaign); }, [selectedCampaign]);
+  useEffect(() => { setLS(LS_KEYS.SELECTED_ADSET, selectedAdSet); }, [selectedAdSet]);
+  useEffect(() => { setLS(LS_KEYS.SELECTED_AD, selectedAd); }, [selectedAd]);
+  useEffect(() => { setLS(LS_KEYS.NUM_ADSETS, numAdSets); }, [numAdSets]);
+  useEffect(() => { setLS(LS_KEYS.ADS_PER_ADSET, adsPerAdSet); }, [adsPerAdSet]);
+  useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, showInactiveCampaigns); }, [showInactiveCampaigns]);
+  useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADSETS, showInactiveAdSets); }, [showInactiveAdSets]);
+  useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADS, showInactiveAds); }, [showInactiveAds]);
 
   const saveEnabledAccounts = (accounts: string[], selected?: string) => {
     setEnabledAdAccounts(accounts);

@@ -770,8 +770,11 @@ export const appRouter = router({
                     message: ad.primaryText,
                     name: ad.headline,
                     link: ad.url,
-                    call_to_action: { type: "LEARN_MORE" },
                     image_hash: uploadedImages[0].hash,
+                    call_to_action: { 
+                      type: "LEARN_MORE",
+                      value: { link: ad.url }
+                    },
                   },
                 }),
               };
@@ -781,6 +784,8 @@ export const appRouter = router({
             Object.entries(creativeData).forEach(([key, value]) => {
               creativeFormData.append(key, value);
             });
+            
+            console.log("Creating creative with data:", JSON.stringify(creativeData, null, 2));
             
             const creativeResponse = await fetch(
               `${META_API_BASE}/${adAccountId}/adcreatives?access_token=${input.accessToken}`,
@@ -793,7 +798,9 @@ export const appRouter = router({
             
             if (!creativeResponse.ok) {
               const error = await creativeResponse.json();
-              throw new Error(`Failed to create creative: ${error.error?.message || "Unknown error"}`);
+              console.error("Creative creation error:", JSON.stringify(error, null, 2));
+              console.error("Creative data sent:", JSON.stringify(creativeData, null, 2));
+              throw new Error(`Failed to create creative: ${error.error?.message || JSON.stringify(error)}`);
             }
             
             const newCreative = await creativeResponse.json();
