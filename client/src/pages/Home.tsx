@@ -220,6 +220,7 @@ export default function Home() {
     AD_SEARCH: 'meta_ads_ad_search',
     ADSETS_PREVIEW: 'meta_ads_adsets_preview',
     SHOW_PREVIEW: 'meta_ads_show_preview',
+    AD_NAME_COMPOSER: 'meta_ads_ad_name_composer',
   };
 
   // Helper to get from localStorage
@@ -299,6 +300,7 @@ export default function Home() {
   const [numAdSets, setNumAdSets] = useState(() => getLS(LS_KEYS.NUM_ADSETS, 1));
   const [adsPerAdSet, setAdsPerAdSet] = useState(() => getLS(LS_KEYS.ADS_PER_ADSET, 5));
   const [showPreview, setShowPreview] = useState(() => getLS(LS_KEYS.SHOW_PREVIEW, false));
+  const [adNameComposer, setAdNameComposer] = useState(() => getLS(LS_KEYS.AD_NAME_COMPOSER, '$IMAGE-NAME'));
 
   // Ad Sets for preview (Step 4) - initialize from localStorage
   const [adSetsPreview, setAdSetsPreview] = useState<AdSetData[]>(() => getLS(LS_KEYS.ADSETS_PREVIEW, []));
@@ -421,6 +423,7 @@ export default function Home() {
   useEffect(() => { setLS(LS_KEYS.SELECTED_AD, selectedAd); }, [selectedAd]);
   useEffect(() => { setLS(LS_KEYS.NUM_ADSETS, numAdSets); }, [numAdSets]);
   useEffect(() => { setLS(LS_KEYS.ADS_PER_ADSET, adsPerAdSet); }, [adsPerAdSet]);
+  useEffect(() => { setLS(LS_KEYS.AD_NAME_COMPOSER, adNameComposer); }, [adNameComposer]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, showInactiveCampaigns); }, [showInactiveCampaigns]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADSETS, showInactiveAdSets); }, [showInactiveAdSets]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADS, showInactiveAds); }, [showInactiveAds]);
@@ -788,14 +791,37 @@ export default function Home() {
     const newAdSets: AdSetData[] = [];
     let groupIndex = 0;
 
+    // Helper to clean adset name (remove aspect ratio suffixes)
+    const cleanAdsetName = (name: string): string => {
+      return name
+        .replace(/[_-]?(4x5|9x16|16x9|1x1|4_5|9_16|16_9|1_1)$/i, '')
+        .trim();
+    };
+
+    // Helper to compose ad name based on template and media type
+    const composeAdName = (imageName: string, hookIndex: number, isVideo: boolean): string => {
+      if (isVideo) {
+        // For video: exact filename without extension, no hook
+        return imageName.replace(/\.[^/.]+$/, '').toUpperCase();
+      } else {
+        // For image: use composer template with hook
+        const cleanImageName = imageName.replace(/\.[^/.]+$/, '').toUpperCase();
+        const baseName = adNameComposer.replace('$IMAGE-NAME', cleanImageName);
+        return `${baseName}_HOOK${hookIndex + 1}`;
+      }
+    };
+
     for (let i = 0; i < numAdSets; i++) {
       const ads: AdData[] = [];
       
       for (let j = 0; j < adsPerAdSet && groupIndex < groupsArray.length; j++) {
         const [prefix, media] = groupsArray[groupIndex];
+        const isVideoGroup = media.some(m => m.type === 'video');
+        const firstMediaName = media[0]?.name || prefix;
+        
         ads.push({
           id: `ad-${Date.now()}-${groupIndex}`,
-          adName: prefix.toUpperCase(),
+          adName: composeAdName(firstMediaName, j, isVideoGroup),
           hook: "",
           primaryText: "",
           media,
@@ -805,9 +831,10 @@ export default function Home() {
       }
 
       if (ads.length > 0) {
-        // Use first media name as adset name (without extension)
+        // Use first media name as adset name (without extension and aspect ratio)
         const firstMediaName = ads[0]?.media[0]?.name || `Ad Set ${i + 1}`;
-        const adsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
+        const rawAdsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
+        const adsetName = cleanAdsetName(rawAdsetName);
         
         newAdSets.push({
           id: `adset-${Date.now()}-${i}`,
@@ -1521,6 +1548,30 @@ export default function Home() {
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
+            {/* Google Drive Import Button - Above Upload Zone */}
+            <button
+              className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 hover:bg-muted transition-colors text-xs text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleGoogleDriveConnect();
+              }}
+              disabled={isLoadingGoogleDrive}
+            >
+              {isLoadingGoogleDrive ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <svg className="h-4 w-4" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066da"/>
+                  <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 47.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27z" fill="#00ac47"/>
+                  <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85L73.55 76.8z" fill="#ea4335"/>
+                  <path d="M43.65 25l13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832d"/>
+                  <path d="M59.85 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.5c1.6 0 3.15-.45 4.5-1.2L59.85 53z" fill="#2684fc"/>
+                  <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 28h27.45c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#ffba00"/>
+                </svg>
+              )}
+              <span>Import from Google Drive</span>
+            </button>
+
             {/* Upload Zone - Full Width */}
             <div
               className="relative border-2 border-dashed rounded-lg p-4 min-h-[150px] transition-colors hover:border-primary/50 cursor-pointer"
@@ -1550,24 +1601,6 @@ export default function Home() {
                 input.click();
               }}
             >
-              {/* Google Drive Icon - Top Left */}
-              <button
-                className="absolute top-2 left-2 p-1.5 rounded-md hover:bg-muted/50 transition-colors z-10"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleGoogleDriveConnect();
-                }}
-                title="Import from Google Drive"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066da"/>
-                  <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 47.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27z" fill="#00ac47"/>
-                  <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85L73.55 76.8z" fill="#ea4335"/>
-                  <path d="M43.65 25l13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832d"/>
-                  <path d="M59.85 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.5c1.6 0 3.15-.45 4.5-1.2L59.85 53z" fill="#2684fc"/>
-                  <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 28h27.45c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#ffba00"/>
-                </svg>
-              </button>
               
               {mediaPool.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -1636,7 +1669,7 @@ export default function Home() {
               Establish Nr of Adsets
             </CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-3">
+          <CardContent className="px-4 pb-3 space-y-3">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <Label className="text-xs">Ad Sets:</Label>
@@ -1663,6 +1696,17 @@ export default function Home() {
               <Button onClick={handleDistribute} disabled={mediaPool.length === 0} size="sm" className="h-7">
                 Distribute
               </Button>
+            </div>
+            {/* Ad Name Composer - only for images */}
+            <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
+              <Label className="text-xs whitespace-nowrap">Ad Name Composer (images only):</Label>
+              <Input
+                value={adNameComposer}
+                onChange={(e) => setAdNameComposer(e.target.value.toUpperCase())}
+                placeholder="$IMAGE-NAME"
+                className="h-7 text-xs font-mono flex-1 max-w-[300px]"
+              />
+              <span className="text-[10px] text-muted-foreground">Use $IMAGE-NAME as placeholder. Hook will be appended automatically.</span>
             </div>
           </CardContent>
         </Card>

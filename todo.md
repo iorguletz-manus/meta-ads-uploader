@@ -373,3 +373,16 @@
 - [x] Implementare Google Picker pentru selectare fișiere din Drive
 - [x] Download fișiere selectate și adăugare în media pool
 - [ ] Salvare Google token în DB pentru auto-reconnect (opțional - tokenul se păstrează în sesiune)
+
+
+## Naming Rules & UI - Round 18
+
+### Naming Rules
+- [x] Adset name - fără "_4x5", "_9x16", "4x5", "9x16" la sfârșit (trim)
+- [x] Ad name pentru imagini - adăugă "_HOOK1", "_HOOK2" etc la sfârșit
+- [x] Adset Name Composer - câmp nou în Step 3 cu variabila $IMAGE-NAME
+- [x] Ad name pentru video - exact numele fișierului, fără hook append
+
+### UI Changes
+- [x] Iconița Google Drive - mutată deasupra border-ului dashed
+- [x] Text "Import from Google Drive" lângă iconiță
