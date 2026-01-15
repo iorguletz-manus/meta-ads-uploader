@@ -351,4 +351,16 @@
 - [x] Zona de drag & drop - full width (fără butonul Google Drive separat)
 
 ### Meta API Fix
-- [ ] Fix eroare "Invalid parameter" - log-urile arată că base64 se convertește corect dar eroarea persistă
+- [x] Adăugat log-uri detaliate la FIECARE pas din batchCreateAds:
+  - STEP 0: Start - template ID, ad set name, nr ads
+  - STEP 1: Get template ad info - page ID, account ID
+  - STEP 2: Get original ad set data
+  - STEP 3: Create new ad set
+  - STEP 4.x: Pentru fiecare ad:
+    - 4a: Upload images - filename, base64 length, hash
+    - 4b: Upload videos - filename, video ID
+    - 4c: Verify media - list all uploaded
+    - 4d: Create creative - all params
+    - 4e: Create ad - all params
+  - STEP 5: Final summary - success/failed count
+- [ ] Fix eroare "Invalid parameter" - așteptăm log-urile pentru a identifica cauza

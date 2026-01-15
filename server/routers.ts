@@ -693,14 +693,31 @@ export const appRouter = router({
         })),
       }))
       .mutation(async ({ input }) => {
-        // Get template info
+        console.log("\n" + "*".repeat(120));
+        console.log("[STEP 0] ******** BATCH CREATE ADS - STARTING ********");
+        console.log("[STEP 0] Template Ad ID:", input.templateAdId);
+        console.log("[STEP 0] New Ad Set Name:", input.newAdSetName);
+        console.log("[STEP 0] Scheduled Time:", input.scheduledTime || "Not scheduled");
+        console.log("[STEP 0] Number of ads to create:", input.ads.length);
+        console.log("[STEP 0] Access Token (first 20 chars):", input.accessToken?.substring(0, 20) + "...");
+        console.log("*".repeat(120));
+        
+        // STEP 1: Get template info
+        console.log("\n[STEP 1] ======== GETTING TEMPLATE AD INFO ========");
+        console.log("[STEP 1] Fetching:", `/${input.templateAdId}?fields=adset_id,account_id,creative{object_story_spec}`);
+        
         const templateAd = await metaApiRequest(
           `/${input.templateAdId}?fields=adset_id,account_id,creative{object_story_spec}`,
           input.accessToken
         );
         
+        console.log("[STEP 1] Template Ad Response:", JSON.stringify(templateAd, null, 2));
+        
         const adAccountId = `act_${templateAd.account_id}`;
         const originalAdSetId = templateAd.adset_id;
+        
+        console.log("[STEP 1] Ad Account ID:", adAccountId);
+        console.log("[STEP 1] Original Ad Set ID:", originalAdSetId);
         
         // Extract page ID from creative
         let pageId = "";
@@ -708,17 +725,26 @@ export const appRouter = router({
           pageId = templateAd.creative.object_story_spec.page_id;
         }
         
+        console.log("[STEP 1] Page ID:", pageId);
+        
         if (!pageId) {
+          console.error("[STEP 1] ERROR: Could not determine page ID from template ad");
           throw new Error("Could not determine page ID from template ad");
         }
         
-        // Step 1: Duplicate the ad set ONCE
+        console.log("[STEP 1] ======== TEMPLATE AD INFO COMPLETE ========\n");
+        
+        // STEP 2: Get original ad set data
+        console.log("[STEP 2] ======== GETTING ORIGINAL AD SET DATA ========");
+        console.log("[STEP 2] Fetching:", `/${originalAdSetId}?fields=...`);
+        
         const originalAdSet = await metaApiRequest(
           `/${originalAdSetId}?fields=campaign_id,targeting,billing_event,optimization_goal,bid_amount,bid_strategy,daily_budget,lifetime_budget,promoted_object,destination_type,attribution_spec,start_time,end_time`,
           input.accessToken
         );
         
-        console.log("Original Ad Set data:", JSON.stringify(originalAdSet, null, 2));
+        console.log("[STEP 2] Original Ad Set Response:", JSON.stringify(originalAdSet, null, 2));
+        console.log("[STEP 2] ======== ORIGINAL AD SET DATA COMPLETE ========\n");
         
         const newAdSetData: Record<string, string> = {
           name: input.newAdSetName,
@@ -753,13 +779,17 @@ export const appRouter = router({
           newAdSetData.attribution_spec = JSON.stringify(originalAdSet.attribution_spec);
         }
         
-        console.log("New Ad Set data to create:", JSON.stringify(newAdSetData, null, 2));
+        // STEP 3: Create new ad set
+        console.log("[STEP 3] ======== CREATING NEW AD SET ========");
+        console.log("[STEP 3] New Ad Set Data:", JSON.stringify(newAdSetData, null, 2));
+        console.log("[STEP 3] Endpoint:", `${META_API_BASE}/${adAccountId}/adsets`);
         
         const adSetFormData = new URLSearchParams();
         Object.entries(newAdSetData).forEach(([key, value]) => {
           adSetFormData.append(key, value);
         });
         
+        console.log("[STEP 3] Sending POST request...");
         const adSetResponse = await fetch(
           `${META_API_BASE}/${adAccountId}/adsets?access_token=${input.accessToken}`,
           {
@@ -769,28 +799,62 @@ export const appRouter = router({
           }
         );
         
+        console.log("[STEP 3] Response status:", adSetResponse.status);
+        
         if (!adSetResponse.ok) {
-          const error = await adSetResponse.json();
-          console.error("Ad Set creation error:", JSON.stringify(error, null, 2));
-          console.error("Request data:", JSON.stringify(newAdSetData, null, 2));
-          throw new Error(`Failed to create ad set: ${error.error?.message || JSON.stringify(error)}`);
+          const errorText = await adSetResponse.text();
+          console.error("[STEP 3] ERROR - Ad Set creation failed!");
+          console.error("[STEP 3] Response status:", adSetResponse.status);
+          console.error("[STEP 3] Raw response:", errorText);
+          let error;
+          try {
+            error = JSON.parse(errorText);
+            console.error("[STEP 3] Error message:", error.error?.message);
+            console.error("[STEP 3] Error code:", error.error?.code);
+            console.error("[STEP 3] Error subcode:", error.error?.error_subcode);
+            console.error("[STEP 3] Error user msg:", error.error?.error_user_msg);
+          } catch {
+            error = { error: { message: errorText } };
+          }
+          throw new Error(`Failed to create ad set: ${error.error?.error_user_msg || error.error?.message || JSON.stringify(error)}`);
         }
         
         const newAdSet = await adSetResponse.json();
+        console.log("[STEP 3] SUCCESS - New Ad Set created!");
+        console.log("[STEP 3] New Ad Set ID:", newAdSet.id);
+        console.log("[STEP 3] Full response:", JSON.stringify(newAdSet, null, 2));
+        console.log("[STEP 3] ======== AD SET CREATION COMPLETE ========\n");
         
-        // Step 2: Create each ad in the new ad set
+        // STEP 4: Create each ad in the new ad set
+        console.log("[STEP 4] ======== CREATING ADS IN NEW AD SET ========");
+        console.log("[STEP 4] Total ads to create:", input.ads.length);
+        
         const results: Array<{ adName: string; success: boolean; adId?: string; error?: string }> = [];
+        let adIndex = 0;
         
         for (const ad of input.ads) {
+          adIndex++;
           try {
-            console.log("\n" + "=".repeat(60));
-            console.log(`[BATCH] Processing ad: ${ad.adName}`);
-            console.log(`[BATCH] Media count: ${ad.media.length}`);
+            console.log("\n" + "#".repeat(120));
+            console.log(`[STEP 4.${adIndex}] ######## PROCESSING AD ${adIndex}/${input.ads.length}: ${ad.adName} ########`);
+            console.log(`[STEP 4.${adIndex}] Ad Name: ${ad.adName}`);
+            console.log(`[STEP 4.${adIndex}] Primary Text: ${ad.primaryText?.substring(0, 100)}...`);
+            console.log(`[STEP 4.${adIndex}] Headline: ${ad.headline}`);
+            console.log(`[STEP 4.${adIndex}] URL: ${ad.url}`);
+            console.log(`[STEP 4.${adIndex}] Media count: ${ad.media.length}`);
+            
+            // Log each media item in detail
             ad.media.forEach((m, i) => {
-              console.log(`[BATCH] Media ${i + 1}: ${m.filename} (${m.type}, ${m.aspectRatio})`);
-              console.log(`[BATCH]   base64 length: ${m.base64?.length || 0}`);
+              console.log(`[STEP 4.${adIndex}] Media[${i}]:`);
+              console.log(`[STEP 4.${adIndex}]   - filename: ${m.filename}`);
+              console.log(`[STEP 4.${adIndex}]   - type: ${m.type}`);
+              console.log(`[STEP 4.${adIndex}]   - aspectRatio: ${m.aspectRatio}`);
+              console.log(`[STEP 4.${adIndex}]   - base64 length: ${m.base64?.length || 0}`);
+              console.log(`[STEP 4.${adIndex}]   - base64 exists: ${!!m.base64}`);
               if (m.base64) {
-                console.log(`[BATCH]   base64 preview: ${m.base64.substring(0, 50)}...`);
+                console.log(`[STEP 4.${adIndex}]   - base64 first 100 chars: ${m.base64.substring(0, 100)}...`);
+              } else {
+                console.log(`[STEP 4.${adIndex}]   - WARNING: base64 is empty or undefined!`);
               }
             });
             
@@ -798,34 +862,32 @@ export const appRouter = router({
             const images = ad.media.filter(m => m.type === "image");
             const videos = ad.media.filter(m => m.type === "video");
             
-            console.log("\n" + "#".repeat(100));
-            console.log("[BATCH] ############## STARTING AD CREATION PROCESS ##############");
-            console.log("[BATCH] Ad name:", ad.adName);
-            console.log("[BATCH] Primary text:", ad.primaryText?.substring(0, 50) + "...");
-            console.log("[BATCH] Headline:", ad.headline);
-            console.log("[BATCH] URL:", ad.url);
-            console.log("[BATCH] Total media items:", ad.media?.length);
-            console.log("[BATCH] Images count:", images.length);
-            console.log("[BATCH] Videos count:", videos.length);
+            console.log(`[STEP 4.${adIndex}] Filtered - Images: ${images.length}, Videos: ${videos.length}`);
+            console.log("#".repeat(120));
             
-            // Log each media item
-            ad.media?.forEach((m, i) => {
-              console.log(`[BATCH] Media[${i}]: filename=${m.filename}, type=${m.type}, aspectRatio=${m.aspectRatio}, base64Length=${m.base64?.length || 0}`);
-            });
-            console.log("#".repeat(100) + "\n");
-            
-            // Upload images
+            // STEP 4a: Upload images
+            console.log(`\n[STEP 4.${adIndex}a] -------- UPLOADING IMAGES --------`);
             const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
+            let imageIndex = 0;
+            
             for (const image of images) {
+              imageIndex++;
+              console.log(`[STEP 4.${adIndex}a] Image ${imageIndex}/${images.length}: ${image.filename}`);
+              
               if (!image.base64) {
-                console.log(`[BATCH] Skipping image ${image.filename} - no base64 data`);
+                console.log(`[STEP 4.${adIndex}a] SKIPPING - no base64 data for ${image.filename}`);
                 continue;
               }
               
-              console.log(`[BATCH] Uploading image: ${image.filename}`);
+              console.log(`[STEP 4.${adIndex}a] Uploading image: ${image.filename}`);
+              console.log(`[STEP 4.${adIndex}a] Base64 length: ${image.base64.length}`);
+              console.log(`[STEP 4.${adIndex}a] Endpoint: ${META_API_BASE}/${adAccountId}/adimages`);
+              
               const imageFormData = new URLSearchParams();
               imageFormData.append("bytes", image.base64);
               imageFormData.append("name", image.filename);
+              
+              console.log(`[STEP 4.${adIndex}a] Sending POST request...`);
               
               const imageResponse = await fetch(
                 `${META_API_BASE}/${adAccountId}/adimages?access_token=${input.accessToken}`,
@@ -874,18 +936,29 @@ export const appRouter = router({
               });
             }
             
-            // Upload videos (using resumable upload API)
+            // STEP 4b: Upload videos
+            console.log(`\n[STEP 4.${adIndex}b] -------- UPLOADING VIDEOS --------`);
             const uploadedVideos: Array<{ id: string; aspectRatio: string }> = [];
+            let videoIndex = 0;
+            
             for (const video of videos) {
-              if (!video.base64) continue;
+              videoIndex++;
+              console.log(`[STEP 4.${adIndex}b] Video ${videoIndex}/${videos.length}: ${video.filename}`);
               
-              // For videos, we need to use the ad account's advideos endpoint
+              if (!video.base64) {
+                console.log(`[STEP 4.${adIndex}b] SKIPPING - no base64 data for ${video.filename}`);
+                continue;
+              }
+              
+              console.log(`[STEP 4.${adIndex}b] Uploading video: ${video.filename}`);
+              console.log(`[STEP 4.${adIndex}b] Base64 length: ${video.base64.length}`);
+              console.log(`[STEP 4.${adIndex}b] Endpoint: ${META_API_BASE}/${adAccountId}/advideos`);
+              
               const videoFormData = new URLSearchParams();
-              // Convert base64 to file_url approach or use source parameter
-              // Meta API accepts base64 encoded video in 'source' parameter
               videoFormData.append("source", `data:video/mp4;base64,${video.base64}`);
               videoFormData.append("title", video.filename);
               
+              console.log(`[STEP 4.${adIndex}b] Sending POST request...`);
               const videoResponse = await fetch(
                 `${META_API_BASE}/${adAccountId}/advideos?access_token=${input.accessToken}`,
                 {
@@ -895,28 +968,60 @@ export const appRouter = router({
                 }
               );
               
+              console.log(`[STEP 4.${adIndex}b] Response status: ${videoResponse.status}`);
+              
               if (!videoResponse.ok) {
-                const error = await videoResponse.json();
-                throw new Error(`Failed to upload video: ${error.error?.message || "Unknown error"}`);
+                const errorText = await videoResponse.text();
+                console.error(`[STEP 4.${adIndex}b] ERROR - Video upload failed!`);
+                console.error(`[STEP 4.${adIndex}b] Raw response: ${errorText}`);
+                let error;
+                try {
+                  error = JSON.parse(errorText);
+                  console.error(`[STEP 4.${adIndex}b] Error message: ${error.error?.message}`);
+                  console.error(`[STEP 4.${adIndex}b] Error code: ${error.error?.code}`);
+                  console.error(`[STEP 4.${adIndex}b] Error user msg: ${error.error?.error_user_msg}`);
+                } catch {
+                  error = { error: { message: errorText } };
+                }
+                throw new Error(`Failed to upload video: ${error.error?.error_user_msg || error.error?.message || "Unknown error"}`);
               }
               
               const videoResult = await videoResponse.json();
+              console.log(`[STEP 4.${adIndex}b] SUCCESS - Video uploaded!`);
+              console.log(`[STEP 4.${adIndex}b] Video ID: ${videoResult.id}`);
+              console.log(`[STEP 4.${adIndex}b] Full response: ${JSON.stringify(videoResult, null, 2)}`);
+              
               uploadedVideos.push({
                 id: videoResult.id,
                 aspectRatio: video.aspectRatio,
               });
             }
             
+            // STEP 4c: Verify media was uploaded
+            console.log(`\n[STEP 4.${adIndex}c] -------- VERIFYING UPLOADED MEDIA --------`);
+            console.log(`[STEP 4.${adIndex}c] Uploaded images: ${uploadedImages.length}`);
+            uploadedImages.forEach((img, i) => {
+              console.log(`[STEP 4.${adIndex}c]   Image ${i+1}: hash=${img.hash}, aspectRatio=${img.aspectRatio}`);
+            });
+            console.log(`[STEP 4.${adIndex}c] Uploaded videos: ${uploadedVideos.length}`);
+            uploadedVideos.forEach((vid, i) => {
+              console.log(`[STEP 4.${adIndex}c]   Video ${i+1}: id=${vid.id}, aspectRatio=${vid.aspectRatio}`);
+            });
+            
             if (uploadedImages.length === 0 && uploadedVideos.length === 0) {
-              console.error(`[BATCH] ERROR: No media was uploaded for ad ${ad.adName}`);
-              console.error(`[BATCH] Images attempted: ${images.length}, Videos attempted: ${videos.length}`);
-              throw new Error("No media was uploaded");
+              console.error(`[STEP 4.${adIndex}c] ERROR: No media was uploaded for ad ${ad.adName}`);
+              console.error(`[STEP 4.${adIndex}c] Images attempted: ${images.length}, Videos attempted: ${videos.length}`);
+              throw new Error("No media was uploaded - check if base64 data was provided");
             }
             
-            // Create creative - use video if available, otherwise image
+            console.log(`[STEP 4.${adIndex}c] Media verification PASSED`);
+            
+            // STEP 4d: Create creative
+            console.log(`\n[STEP 4.${adIndex}d] -------- CREATING CREATIVE --------`);
             let creativeData: Record<string, string>;
             
             if (uploadedVideos.length > 0) {
+              console.log(`[STEP 4.${adIndex}d] Creating VIDEO creative`);
               // Video creative
               creativeData = {
                 name: `${ad.adName}_creative`,
@@ -937,6 +1042,7 @@ export const appRouter = router({
                 }),
               };
             } else {
+              console.log(`[STEP 4.${adIndex}d] Creating IMAGE creative`);
               // Image creative
               creativeData = {
                 name: `${ad.adName}_creative`,
@@ -961,12 +1067,25 @@ export const appRouter = router({
               creativeFormData.append(key, value);
             });
             
-            console.log("=" .repeat(80));
-            console.log("[CREATIVE] Creating creative with data:");
-            console.log("[CREATIVE] name:", creativeData.name);
-            console.log("[CREATIVE] object_story_spec:", creativeData.object_story_spec);
-            console.log("[CREATIVE] Parsed object_story_spec:", JSON.stringify(JSON.parse(creativeData.object_story_spec), null, 2));
-            console.log("=" .repeat(80));
+            console.log(`[STEP 4.${adIndex}d] Creative data prepared:`);
+            console.log(`[STEP 4.${adIndex}d]   name: ${creativeData.name}`);
+            const parsedSpec = JSON.parse(creativeData.object_story_spec);
+            console.log(`[STEP 4.${adIndex}d]   page_id: ${parsedSpec.page_id}`);
+            if (parsedSpec.link_data) {
+              console.log(`[STEP 4.${adIndex}d]   link_data.message: ${parsedSpec.link_data.message?.substring(0, 50)}...`);
+              console.log(`[STEP 4.${adIndex}d]   link_data.name: ${parsedSpec.link_data.name}`);
+              console.log(`[STEP 4.${adIndex}d]   link_data.link: ${parsedSpec.link_data.link}`);
+              console.log(`[STEP 4.${adIndex}d]   link_data.image_hash: ${parsedSpec.link_data.image_hash}`);
+              console.log(`[STEP 4.${adIndex}d]   link_data.call_to_action: ${JSON.stringify(parsedSpec.link_data.call_to_action)}`);
+            }
+            if (parsedSpec.video_data) {
+              console.log(`[STEP 4.${adIndex}d]   video_data.video_id: ${parsedSpec.video_data.video_id}`);
+              console.log(`[STEP 4.${adIndex}d]   video_data.message: ${parsedSpec.video_data.message?.substring(0, 50)}...`);
+              console.log(`[STEP 4.${adIndex}d]   video_data.title: ${parsedSpec.video_data.title}`);
+            }
+            console.log(`[STEP 4.${adIndex}d] Full object_story_spec: ${JSON.stringify(parsedSpec, null, 2)}`);
+            console.log(`[STEP 4.${adIndex}d] Endpoint: ${META_API_BASE}/${adAccountId}/adcreatives`);
+            console.log(`[STEP 4.${adIndex}d] Sending POST request...`);
             
             const creativeResponse = await fetch(
               `${META_API_BASE}/${adAccountId}/adcreatives?access_token=${input.accessToken}`,
@@ -1027,8 +1146,12 @@ export const appRouter = router({
             }
             
             const newCreative = await creativeResponse.json();
+            console.log(`[STEP 4.${adIndex}d] SUCCESS - Creative created!`);
+            console.log(`[STEP 4.${adIndex}d] Creative ID: ${newCreative.id}`);
+            console.log(`[STEP 4.${adIndex}d] Full response: ${JSON.stringify(newCreative, null, 2)}`);
             
-            // Create ad with optional scheduling
+            // STEP 4e: Create ad
+            console.log(`\n[STEP 4.${adIndex}e] -------- CREATING AD --------`);
             const adData: Record<string, string> = {
               name: ad.adName,
               adset_id: newAdSet.id,
@@ -1036,19 +1159,27 @@ export const appRouter = router({
               status: "PAUSED",
             };
             
-            // Add scheduled time if provided (convert to Unix timestamp)
+            // Add scheduled time if provided
             if (input.scheduledTime) {
               const scheduledDate = new Date(input.scheduledTime);
               adData.configured_status = "ACTIVE";
-              // Meta API expects Unix timestamp in seconds
               adData.effective_status = "SCHEDULED";
+              console.log(`[STEP 4.${adIndex}e] Scheduled time: ${input.scheduledTime}`);
             }
+            
+            console.log(`[STEP 4.${adIndex}e] Ad data:`);
+            console.log(`[STEP 4.${adIndex}e]   name: ${adData.name}`);
+            console.log(`[STEP 4.${adIndex}e]   adset_id: ${adData.adset_id}`);
+            console.log(`[STEP 4.${adIndex}e]   creative: ${adData.creative}`);
+            console.log(`[STEP 4.${adIndex}e]   status: ${adData.status}`);
+            console.log(`[STEP 4.${adIndex}e] Endpoint: ${META_API_BASE}/${adAccountId}/ads`);
             
             const adFormData = new URLSearchParams();
             Object.entries(adData).forEach(([key, value]) => {
               adFormData.append(key, value);
             });
             
+            console.log(`[STEP 4.${adIndex}e] Sending POST request...`);
             const adResponse = await fetch(
               `${META_API_BASE}/${adAccountId}/ads?access_token=${input.accessToken}`,
               {
@@ -1058,22 +1189,65 @@ export const appRouter = router({
               }
             );
             
+            console.log(`[STEP 4.${adIndex}e] Response status: ${adResponse.status}`);
+            
             if (!adResponse.ok) {
-              const error = await adResponse.json();
-              throw new Error(`Failed to create ad: ${error.error?.message || "Unknown error"}`);
+              const errorText = await adResponse.text();
+              console.error(`[STEP 4.${adIndex}e] ERROR - Ad creation failed!`);
+              console.error(`[STEP 4.${adIndex}e] Response status: ${adResponse.status}`);
+              console.error(`[STEP 4.${adIndex}e] Raw response: ${errorText}`);
+              let error;
+              try {
+                error = JSON.parse(errorText);
+                console.error(`[STEP 4.${adIndex}e] Error message: ${error.error?.message}`);
+                console.error(`[STEP 4.${adIndex}e] Error code: ${error.error?.code}`);
+                console.error(`[STEP 4.${adIndex}e] Error subcode: ${error.error?.error_subcode}`);
+                console.error(`[STEP 4.${adIndex}e] Error user msg: ${error.error?.error_user_msg}`);
+                console.error(`[STEP 4.${adIndex}e] fbtrace_id: ${error.error?.fbtrace_id}`);
+              } catch {
+                error = { error: { message: errorText } };
+              }
+              throw new Error(`Failed to create ad: ${error.error?.error_user_msg || error.error?.message || "Unknown error"}`);
             }
             
             const newAd = await adResponse.json();
+            console.log(`[STEP 4.${adIndex}e] SUCCESS - Ad created!`);
+            console.log(`[STEP 4.${adIndex}e] Ad ID: ${newAd.id}`);
+            console.log(`[STEP 4.${adIndex}e] Full response: ${JSON.stringify(newAd, null, 2)}`);
+            console.log(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} COMPLETED SUCCESSFULLY ########\n`);
+            
             results.push({ adName: ad.adName, success: true, adId: newAd.id });
             
           } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Unknown error";
+            console.error(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} FAILED ########`);
+            console.error(`[STEP 4.${adIndex}] Error: ${errorMsg}`);
+            console.error(`[STEP 4.${adIndex}] Full error:`, error);
+            
             results.push({ 
               adName: ad.adName, 
               success: false, 
-              error: error instanceof Error ? error.message : "Unknown error" 
+              error: errorMsg
             });
           }
         }
+        
+        // STEP 5: Final summary
+        console.log("\n" + "*".repeat(120));
+        console.log("[STEP 5] ******** BATCH CREATE ADS - COMPLETED ********");
+        console.log("[STEP 5] Ad Set ID:", newAdSet.id);
+        console.log("[STEP 5] Ad Set Name:", input.newAdSetName);
+        console.log("[STEP 5] Total ads processed:", results.length);
+        console.log("[STEP 5] Successful:", results.filter(r => r.success).length);
+        console.log("[STEP 5] Failed:", results.filter(r => !r.success).length);
+        results.forEach((r, i) => {
+          if (r.success) {
+            console.log(`[STEP 5]   Ad ${i+1}: ${r.adName} - SUCCESS (ID: ${r.adId})`);
+          } else {
+            console.log(`[STEP 5]   Ad ${i+1}: ${r.adName} - FAILED: ${r.error}`);
+          }
+        });
+        console.log("*".repeat(120) + "\n");
         
         return {
           adSetId: newAdSet.id,
