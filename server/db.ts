@@ -89,4 +89,78 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Facebook token management
+export async function saveFacebookToken(openId: string, accessToken: string, expiresIn: number): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot save Facebook token: database not available");
+    return;
+  }
+
+  try {
+    // Calculate expiry date (expiresIn is in seconds)
+    const expiryDate = new Date(Date.now() + expiresIn * 1000);
+    
+    await db.update(users)
+      .set({
+        facebookAccessToken: accessToken,
+        facebookTokenExpiry: expiryDate,
+      })
+      .where(eq(users.openId, openId));
+  } catch (error) {
+    console.error("[Database] Failed to save Facebook token:", error);
+    throw error;
+  }
+}
+
+export async function getFacebookToken(openId: string): Promise<{ accessToken: string; expiry: Date } | null> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get Facebook token: database not available");
+    return null;
+  }
+
+  try {
+    const result = await db.select({
+      accessToken: users.facebookAccessToken,
+      expiry: users.facebookTokenExpiry,
+    }).from(users).where(eq(users.openId, openId)).limit(1);
+
+    if (result.length === 0 || !result[0].accessToken || !result[0].expiry) {
+      return null;
+    }
+
+    // Check if token is expired
+    if (new Date() > result[0].expiry) {
+      return null;
+    }
+
+    return {
+      accessToken: result[0].accessToken,
+      expiry: result[0].expiry,
+    };
+  } catch (error) {
+    console.error("[Database] Failed to get Facebook token:", error);
+    return null;
+  }
+}
+
+export async function clearFacebookToken(openId: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot clear Facebook token: database not available");
+    return;
+  }
+
+  try {
+    await db.update(users)
+      .set({
+        facebookAccessToken: null,
+        facebookTokenExpiry: null,
+      })
+      .where(eq(users.openId, openId));
+  } catch (error) {
+    console.error("[Database] Failed to clear Facebook token:", error);
+    throw error;
+  }
+}

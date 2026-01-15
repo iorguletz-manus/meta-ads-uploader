@@ -20,6 +20,10 @@ export const users = mysqlTable("users", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  /** Facebook access token for Meta Ads API */
+  facebookAccessToken: text("facebookAccessToken"),
+  /** Facebook token expiry timestamp */
+  facebookTokenExpiry: timestamp("facebookTokenExpiry"),
 });
 
 export type User = typeof users.$inferSelect;

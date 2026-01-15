@@ -8,6 +8,13 @@
       "when": 1768327532215,
       "tag": "0000_tough_bushwacker",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1768479360474,
+      "tag": "0001_heavy_caretaker",
+      "breakpoints": true
     }
   ]
 }

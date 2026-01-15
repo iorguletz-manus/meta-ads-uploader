@@ -330,17 +330,40 @@ export default function Home() {
     })
   );
 
-  // Check for FB token in URL
+  // Query for saved Facebook token
+  const savedTokenQuery = trpc.meta.getSavedToken.useQuery(undefined, {
+    enabled: !!user && !fbConnected,
+  });
+
+  // Mutation to save Facebook token
+  const saveTokenMutation = trpc.meta.saveFacebookToken.useMutation();
+
+  // Auto-connect if we have a saved token
+  useEffect(() => {
+    if (savedTokenQuery.data && !fbConnected) {
+      setFbAccessToken(savedTokenQuery.data.accessToken);
+      setFbConnected(true);
+      toast.success("Facebook auto-connected from saved session!");
+    }
+  }, [savedTokenQuery.data, fbConnected]);
+
+  // Check for FB token in URL (OAuth callback)
   useEffect(() => {
     const hash = window.location.hash;
     if (hash.includes("access_token")) {
       const params = new URLSearchParams(hash.substring(1));
       const token = params.get("access_token");
+      const expiresIn = params.get("expires_in");
       if (token) {
         setFbAccessToken(token);
         setFbConnected(true);
         window.history.replaceState({}, document.title, window.location.pathname);
-        toast.success("Facebook connected!");
+        
+        // Save token to database for persistence
+        const expiry = expiresIn ? parseInt(expiresIn) : 5184000; // Default 60 days
+        saveTokenMutation.mutate({ accessToken: token, expiresIn: expiry });
+        
+        toast.success("Facebook connected and saved!");
       }
     }
   }, []);

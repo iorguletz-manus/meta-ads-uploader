@@ -1,5 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
+import { saveFacebookToken, getFacebookToken, clearFacebookToken } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -76,6 +77,31 @@ export const appRouter = router({
   }),
 
   meta: router({
+    // Save Facebook token to database
+    saveFacebookToken: protectedProcedure
+      .input(z.object({ accessToken: z.string(), expiresIn: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) throw new Error("Not authenticated");
+        await saveFacebookToken(ctx.user.openId, input.accessToken, input.expiresIn);
+        return { success: true };
+      }),
+
+    // Get saved Facebook token from database
+    getSavedToken: protectedProcedure
+      .query(async ({ ctx }) => {
+        if (!ctx.user) return null;
+        const token = await getFacebookToken(ctx.user.openId);
+        return token;
+      }),
+
+    // Clear Facebook token from database
+    clearToken: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        if (!ctx.user) throw new Error("Not authenticated");
+        await clearFacebookToken(ctx.user.openId);
+        return { success: true };
+      }),
+
     // Get ad accounts for the user
     getAdAccounts: protectedProcedure
       .input(z.object({ accessToken: z.string() }))

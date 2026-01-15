@@ -19,6 +19,8 @@ function createAuthContext(): TrpcContext {
     createdAt: new Date(),
     updatedAt: new Date(),
     lastSignedIn: new Date(),
+    facebookAccessToken: null,
+    facebookTokenExpiry: null,
   };
 
   return {

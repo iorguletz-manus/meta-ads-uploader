@@ -108,3 +108,11 @@
 - [x] Add "Show Inactive" checkbox for Ad Sets column
 - [x] Add "Show Inactive" checkbox for Ads column
 - [x] Filter items based on status when toggle is off
+
+## Facebook Token Persistence
+- [x] Add facebookAccessToken column to users table
+- [x] Add facebookTokenExpiry column to track expiration
+- [x] Create backend procedure to save Facebook token after OAuth
+- [x] Create backend procedure to get saved Facebook token
+- [x] Update frontend to check for saved token on load
+- [x] Auto-connect Facebook if valid token exists in DB
