@@ -259,3 +259,12 @@
 - [x] Implementare rate limiting - pauză de 2s între Ad Sets
 - [x] Afișare progres și pauze în logs
 - [x] Meta API Limits: ~200 calls/hour pentru Standard tier, ~5000 pentru Dev tier
+
+
+## Bug Fix - Round 9
+
+### localStorage Fix
+- [x] Fix: Datele se salvează acum la refresh
+- [x] Adăugat salvare media pool în localStorage (cu limită 4MB)
+- [x] Fix auto-connect Facebook din localStorage când nu există token în DB
+- [x] Toate selecțiile (campaign, adset, ad, ad account) se salvează și se restaurează

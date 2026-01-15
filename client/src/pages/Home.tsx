@@ -156,6 +156,7 @@ export default function Home() {
     SHOW_INACTIVE_CAMPAIGNS: 'meta_ads_show_inactive_campaigns',
     SHOW_INACTIVE_ADSETS: 'meta_ads_show_inactive_adsets',
     SHOW_INACTIVE_ADS: 'meta_ads_show_inactive_ads',
+    MEDIA_POOL: 'meta_ads_media_pool',
   };
 
   // Helper to get from localStorage
@@ -206,8 +207,24 @@ export default function Home() {
   const [showInactiveAdSets, setShowInactiveAdSets] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADSETS, false));
   const [showInactiveAds, setShowInactiveAds] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADS, false));
 
-  // Media pool (Step 2)
-  const [mediaPool, setMediaPool] = useState<MediaFile[]>([]);
+  // Media pool (Step 2) - initialize from localStorage
+  const [mediaPool, setMediaPool] = useState<MediaFile[]>(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEYS.MEDIA_POOL);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Recreate preview URLs from base64
+        return parsed.map((m: MediaFile) => ({
+          ...m,
+          preview: m.base64, // Use base64 as preview since URL.createObjectURL won't work
+          file: null as unknown as File, // File object can't be serialized
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to load media from localStorage:', e);
+    }
+    return [];
+  });
 
   // Distribution settings (Step 3) - initialize from localStorage
   const [numAdSets, setNumAdSets] = useState(() => getLS(LS_KEYS.NUM_ADSETS, 1));
@@ -244,14 +261,20 @@ export default function Home() {
   // Mutation to save ad account settings
   const saveAdAccountSettingsMutation = trpc.meta.saveAdAccountSettings.useMutation();
 
-  // Auto-connect if we have a saved token
+  // Auto-connect if we have a saved token (from DB or localStorage)
   useEffect(() => {
+    // First try from database
     if (savedTokenQuery.data && !fbConnected) {
       setFbAccessToken(savedTokenQuery.data.accessToken);
       setFbConnected(true);
       toast.success("Facebook auto-connected!");
+    } 
+    // If no DB token but we have localStorage token, use that
+    else if (!savedTokenQuery.data && !fbConnected && fbAccessToken) {
+      setFbConnected(true);
+      toast.success("Facebook connected from cache!");
     }
-  }, [savedTokenQuery.data, fbConnected]);
+  }, [savedTokenQuery.data, fbConnected, fbAccessToken]);
 
   // Load ad account settings from database
   useEffect(() => {
@@ -314,6 +337,30 @@ export default function Home() {
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, showInactiveCampaigns); }, [showInactiveCampaigns]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADSETS, showInactiveAdSets); }, [showInactiveAdSets]);
   useEffect(() => { setLS(LS_KEYS.SHOW_INACTIVE_ADS, showInactiveAds); }, [showInactiveAds]);
+  
+  // Save media pool to localStorage (with size limit check)
+  useEffect(() => {
+    try {
+      // Only save essential data (skip file object)
+      const toSave = mediaPool.map(m => ({
+        id: m.id,
+        name: m.name,
+        aspectRatio: m.aspectRatio,
+        base64: m.base64,
+        type: m.type,
+        preview: '', // Don't save preview URL
+      }));
+      const json = JSON.stringify(toSave);
+      // Check size (localStorage limit is ~5MB)
+      if (json.length < 4 * 1024 * 1024) {
+        localStorage.setItem(LS_KEYS.MEDIA_POOL, json);
+      } else {
+        console.warn('Media pool too large for localStorage, not saving');
+      }
+    } catch (e) {
+      console.error('Failed to save media to localStorage:', e);
+    }
+  }, [mediaPool]);
 
   const saveEnabledAccounts = (accounts: string[], selected?: string) => {
     setEnabledAdAccounts(accounts);
