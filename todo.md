@@ -214,3 +214,19 @@
 
 - [x] Ștergere cont facturi4 din baza de date (nu se folosește)
 - [x] Fix scroll vertical în containere campaigns/adsets/ads (scrollbar vizibil mereu)
+
+
+## Cerințe Noi - Round 6
+
+### UI Improvements
+- [x] Sortare campaigns/adsets/ads alfabetic A-Z by default
+- [x] Auto-arrange text la paste în Body textarea
+- [x] Hook textarea 50% mai mic (55px)
+- [x] Nume Adset = nume imagine (nu "Adset 1"), cu label "Adset N:" în stânga
+
+### Bug Fixes
+- [x] Fix eroare "Invalid parameter" - adăugat mai mulți parametri din originalAdSet
+- [ ] Fix persistență token Facebook la refresh (necesită investigare suplimentară)
+
+### New Features
+- [x] Progress logs live la Create cu progress bar și dialog

@@ -596,9 +596,11 @@ export const appRouter = router({
         
         // Step 1: Duplicate the ad set ONCE
         const originalAdSet = await metaApiRequest(
-          `/${originalAdSetId}?fields=campaign_id,targeting,billing_event,optimization_goal,bid_amount,daily_budget,lifetime_budget,promoted_object`,
+          `/${originalAdSetId}?fields=campaign_id,targeting,billing_event,optimization_goal,bid_amount,bid_strategy,daily_budget,lifetime_budget,promoted_object,destination_type,attribution_spec,start_time,end_time`,
           input.accessToken
         );
+        
+        console.log("Original Ad Set data:", JSON.stringify(originalAdSet, null, 2));
         
         const newAdSetData: Record<string, string> = {
           name: input.newAdSetName,
@@ -620,9 +622,20 @@ export const appRouter = router({
         if (originalAdSet.bid_amount) {
           newAdSetData.bid_amount = originalAdSet.bid_amount;
         }
+        if (originalAdSet.bid_strategy) {
+          newAdSetData.bid_strategy = originalAdSet.bid_strategy;
+        }
         if (originalAdSet.promoted_object) {
           newAdSetData.promoted_object = JSON.stringify(originalAdSet.promoted_object);
         }
+        if (originalAdSet.destination_type) {
+          newAdSetData.destination_type = originalAdSet.destination_type;
+        }
+        if (originalAdSet.attribution_spec) {
+          newAdSetData.attribution_spec = JSON.stringify(originalAdSet.attribution_spec);
+        }
+        
+        console.log("New Ad Set data to create:", JSON.stringify(newAdSetData, null, 2));
         
         const adSetFormData = new URLSearchParams();
         Object.entries(newAdSetData).forEach(([key, value]) => {

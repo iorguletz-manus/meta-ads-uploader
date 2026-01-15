@@ -1,6 +1,5 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { sdk } from "./sdk";
 import { COOKIE_NAME } from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
 import { jwtVerify } from "jose";
@@ -26,7 +25,7 @@ async function verifySimpleSession(cookieValue: string | undefined): Promise<Use
       algorithms: ["HS256"],
     });
     
-    // Check if it's our fixed user
+    // Check if it's our fixed user iorguletz
     if (payload.openId === FIXED_USER_OPEN_ID && payload.name === FIXED_USER_NAME) {
       // Try to get user from database
       let dbUser = await getUserByOpenId(FIXED_USER_OPEN_ID);
@@ -75,17 +74,11 @@ export async function createContext(
   let user: User | null = null;
 
   try {
-    // First try simple login verification
+    // Only use simple login verification for iorguletz
     const cookies = parseCookieHeader(opts.req.headers.cookie || "");
     const sessionCookie = cookies[COOKIE_NAME];
     
-    const simpleUser = await verifySimpleSession(sessionCookie);
-    if (simpleUser) {
-      user = simpleUser;
-    } else {
-      // Fall back to SDK authentication
-      user = await sdk.authenticateRequest(opts.req);
-    }
+    user = await verifySimpleSession(sessionCookie);
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;

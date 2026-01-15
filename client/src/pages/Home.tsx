@@ -189,6 +189,9 @@ export default function Home() {
 
   // Creating state
   const [isCreating, setIsCreating] = useState(false);
+  const [progressLogs, setProgressLogs] = useState<string[]>([]);
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
 
   // Query for saved Facebook token
   const savedTokenQuery = trpc.meta.getSavedToken.useQuery(undefined, {
@@ -414,9 +417,13 @@ export default function Home() {
       }
 
       if (ads.length > 0) {
+        // Use first media name as adset name (without extension)
+        const firstMediaName = ads[0]?.media[0]?.name || `Ad Set ${i + 1}`;
+        const adsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
+        
         newAdSets.push({
           id: `adset-${Date.now()}-${i}`,
-          name: `Ad Set ${i + 1}`,
+          name: adsetName,
           ads,
           sharedBody: "",
           sharedHeadline: "",
@@ -495,6 +502,11 @@ export default function Home() {
     toast.success("Schedule applied to all Ad Sets");
   };
 
+  // Helper to add progress log
+  const addProgressLog = (message: string) => {
+    setProgressLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+  };
+
   // Create all ads
   const handleCreateAll = async () => {
     if (!selectedAd || !selectedAdSet || !fbAccessToken) {
@@ -508,24 +520,38 @@ export default function Home() {
       return;
     }
 
+    // Reset and show progress
+    setProgressLogs([]);
+    setProgressPercent(0);
+    setShowProgressDialog(true);
     setIsCreating(true);
+    
+    const totalAds = adSetsWithAds.reduce((sum, as) => sum + as.ads.length, 0);
+    let completedAds = 0;
+    
+    addProgressLog(`Starting creation of ${adSetsWithAds.length} Ad Set(s) with ${totalAds} total ads...`);
 
-    for (const adSet of adSetsWithAds) {
+    for (let adSetIndex = 0; adSetIndex < adSetsWithAds.length; adSetIndex++) {
+      const adSet = adSetsWithAds[adSetIndex];
       setAdSetsPreview((prev) =>
         prev.map((as) => (as.id === adSet.id ? { ...as, status: "creating" } : as))
       );
 
       try {
+        addProgressLog(`[Ad Set ${adSetIndex + 1}/${adSetsWithAds.length}] Creating "${adSet.name}"...`);
+        
         let scheduledTime: number | undefined;
         if (adSet.scheduleEnabled && adSet.scheduleDate && adSet.scheduleTime) {
           const bucharestDate = new Date(`${adSet.scheduleDate}T${adSet.scheduleTime}:00`);
           scheduledTime = Math.floor(bucharestDate.getTime() / 1000);
+          addProgressLog(`  → Scheduled for ${adSet.scheduleDate} ${adSet.scheduleTime}`);
         }
 
+        addProgressLog(`  → Preparing ${adSet.ads.length} ad(s)...`);
+        
         const adsToCreate = adSet.ads.map((ad) => {
           let primaryText = "";
           if (adSet.mediaType === "image" || adSet.mediaType === "mixed") {
-            // Use combineHookAndBody for proper spacing
             primaryText = combineHookAndBody(ad.hook, adSet.sharedBody);
           } else {
             primaryText = ad.primaryText;
@@ -545,6 +571,8 @@ export default function Home() {
           };
         });
 
+        addProgressLog(`  → Uploading media and creating ads via Meta API...`);
+        
         const result = await batchCreateAdsMutation.mutateAsync({
           accessToken: fbAccessToken,
           templateAdId: selectedAd,
@@ -555,6 +583,15 @@ export default function Home() {
 
         const updatedAds = adSet.ads.map((ad, idx) => {
           const adResult = result.results[idx];
+          completedAds++;
+          setProgressPercent(Math.round((completedAds / totalAds) * 100));
+          
+          if (adResult?.success) {
+            addProgressLog(`  ✓ Ad "${ad.adName}" created successfully (ID: ${adResult.adId})`);
+          } else {
+            addProgressLog(`  ✗ Ad "${ad.adName}" failed: ${adResult?.error || "Unknown error"}`);
+          }
+          
           return {
             ...ad,
             status: adResult?.success ? ("success" as const) : ("error" as const),
@@ -564,6 +601,12 @@ export default function Home() {
         });
 
         const allSuccess = updatedAds.every((ad) => ad.status === "success");
+        
+        if (allSuccess) {
+          addProgressLog(`  ✓ Ad Set "${adSet.name}" completed successfully!`);
+        } else {
+          addProgressLog(`  ⚠ Ad Set "${adSet.name}" completed with some errors`);
+        }
 
         setAdSetsPreview((prev) =>
           prev.map((as) =>
@@ -576,6 +619,8 @@ export default function Home() {
         toast.success(`Ad Set "${adSet.name}" created!`);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        addProgressLog(`  ✗ ERROR: ${errorMessage}`);
+        
         setAdSetsPreview((prev) =>
           prev.map((as) =>
             as.id === adSet.id
@@ -587,6 +632,9 @@ export default function Home() {
       }
     }
 
+    addProgressLog(`\n=== COMPLETED ===`);
+    addProgressLog(`Total: ${completedAds}/${totalAds} ads created`);
+    setProgressPercent(100);
     setIsCreating(false);
   };
 
@@ -670,23 +718,29 @@ export default function Home() {
     }
   };
 
-  // Filter campaigns, ad sets, ads by search
+  // Filter and sort campaigns, ad sets, ads by search (alphabetically A-Z)
   const campaigns = useMemo(() => {
     const data = (campaignsQuery.data || []) as Campaign[];
-    if (!campaignSearch) return data;
-    return data.filter(c => c.name.toLowerCase().includes(campaignSearch.toLowerCase()));
+    const filtered = campaignSearch 
+      ? data.filter(c => c.name.toLowerCase().includes(campaignSearch.toLowerCase()))
+      : data;
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
   }, [campaignsQuery.data, campaignSearch]);
 
   const adSets = useMemo(() => {
     const data = (adSetsQuery.data || []) as AdSet[];
-    if (!adSetSearch) return data;
-    return data.filter(a => a.name.toLowerCase().includes(adSetSearch.toLowerCase()));
+    const filtered = adSetSearch
+      ? data.filter(a => a.name.toLowerCase().includes(adSetSearch.toLowerCase()))
+      : data;
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
   }, [adSetsQuery.data, adSetSearch]);
 
   const ads = useMemo(() => {
     const data = (adsQuery.data || []) as Ad[];
-    if (!adSearch) return data;
-    return data.filter(a => a.name.toLowerCase().includes(adSearch.toLowerCase()));
+    const filtered = adSearch
+      ? data.filter(a => a.name.toLowerCase().includes(adSearch.toLowerCase()))
+      : data;
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
   }, [adsQuery.data, adSearch]);
 
   const totalAdsInPreview = adSetsPreview.reduce((sum, as) => sum + as.ads.length, 0);
@@ -1121,7 +1175,7 @@ export default function Home() {
               </div>
             </CardHeader>
             <CardContent className="px-4 pb-3 space-y-3">
-              {adSetsPreview.map((adSet) => (
+              {adSetsPreview.map((adSet, index) => (
                 <Card
                   key={adSet.id}
                   className={`${
@@ -1143,6 +1197,7 @@ export default function Home() {
                         >
                           {adSet.isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                         </Button>
+                        <span className="text-xs text-muted-foreground font-medium">Adset {index + 1}:</span>
                         <Input
                           value={adSet.name}
                           onChange={(e) => updateAdSet(adSet.id, "name", e.target.value)}
@@ -1278,7 +1333,7 @@ export default function Home() {
                                       value={ad.hook}
                                       onChange={(e) => updateAd(adSet.id, ad.id, "hook", e.target.value)}
                                       className="text-xs resize-y"
-                                      style={{ minHeight: "110px", width: "100%" }}
+                                      style={{ minHeight: "55px", width: "100%" }}
                                       placeholder="Hook text..."
                                     />
                                   </div>
@@ -1324,6 +1379,12 @@ export default function Home() {
                               <Textarea
                                 value={adSet.sharedBody}
                                 onChange={(e) => updateAdSet(adSet.id, "sharedBody", e.target.value)}
+                                onPaste={(e) => {
+                                  e.preventDefault();
+                                  const pastedText = e.clipboardData.getData('text');
+                                  const arrangedText = arrangeText(pastedText);
+                                  updateAdSet(adSet.id, "sharedBody", arrangedText);
+                                }}
                                 className="text-xs resize-y"
                                 style={{ minHeight: "400px", width: "100%" }}
                                 placeholder="Shared body text..."
@@ -1492,6 +1553,65 @@ export default function Home() {
               disabled={enabledAdAccounts.length === 0}
             >
               Save ({enabledAdAccounts.length} selected)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Progress Dialog */}
+      <Dialog open={showProgressDialog} onOpenChange={setShowProgressDialog}>
+        <DialogContent className="max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="text-base flex items-center gap-2">
+              {isCreating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating Ads...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  Creation Complete
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {/* Progress Bar */}
+          <div className="w-full bg-muted rounded-full h-2 mb-3">
+            <div 
+              className="bg-primary h-2 rounded-full transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mb-2">{progressPercent}% complete</p>
+          
+          {/* Logs */}
+          <div className="bg-slate-900 rounded-lg p-3 max-h-[300px] overflow-y-auto font-mono text-xs">
+            {progressLogs.map((log, i) => (
+              <div 
+                key={i} 
+                className={`${
+                  log.includes('✓') ? 'text-green-400' : 
+                  log.includes('✗') ? 'text-red-400' : 
+                  log.includes('⚠') ? 'text-yellow-400' :
+                  log.includes('===') ? 'text-blue-400 font-bold' :
+                  'text-slate-300'
+                }`}
+              >
+                {log}
+              </div>
+            ))}
+          </div>
+          
+          <DialogFooter>
+            <Button 
+              size="sm" 
+              variant="outline"
+              onClick={() => setShowProgressDialog(false)}
+              disabled={isCreating}
+            >
+              {isCreating ? 'Please wait...' : 'Close'}
             </Button>
           </DialogFooter>
         </DialogContent>
