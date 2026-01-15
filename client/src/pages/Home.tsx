@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { trpc } from "@/lib/trpc";
 import {
   DndContext,
@@ -28,9 +28,12 @@ import {
   Loader2,
   LogOut,
   Plus,
+  Settings,
   Trash2,
   Upload,
   XCircle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -84,6 +87,11 @@ interface Ad {
   id: string;
   name: string;
   status: string;
+  creative?: {
+    id: string;
+    thumbnail_url?: string;
+    image_url?: string;
+  };
 }
 
 interface AdAccount {
@@ -98,17 +106,13 @@ function DraggableAdGroup({
   onUpdate,
   onRemove,
   disabled,
-  compact = false,
 }: {
   group: AdGroup;
   onUpdate: (field: keyof AdGroup, value: string) => void;
   onRemove: () => void;
-  disabled: boolean;
-  compact?: boolean;
+  disabled?: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: group.id,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: group.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -116,151 +120,90 @@ function DraggableAdGroup({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  if (compact) {
-    return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={`bg-white border rounded-lg p-2 ${isDragging ? "shadow-lg ring-2 ring-primary" : "shadow-sm"}`}
-      >
-        <div className="flex items-center gap-2">
-          <div
-            {...attributes}
-            {...listeners}
-            className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
-          >
-            <GripVertical className="h-4 w-4" />
-          </div>
-          <div className="flex gap-1">
-            {group.media.slice(0, 2).map((m, i) => (
-              <div key={i} className="relative w-8 h-8">
-                {m.type === "video" ? (
-                  <div className="w-full h-full bg-slate-700 rounded flex items-center justify-center">
-                    <Film className="h-3 w-3 text-white" />
-                  </div>
-                ) : (
-                  <img src={m.preview} alt="" className="w-full h-full object-cover rounded" />
-                )}
-              </div>
-            ))}
-          </div>
-          <span className="text-sm font-medium truncate flex-1">{group.adName}</span>
-          <StatusBadge status={group.status} errorMessage={group.errorMessage} />
-        </div>
-      </div>
-    );
-  }
+  const statusIcon =
+    group.status === "success" ? (
+      <CheckCircle2 className="h-4 w-4 text-green-500" />
+    ) : group.status === "error" ? (
+      <XCircle className="h-4 w-4 text-red-500" />
+    ) : group.status === "creating" ? (
+      <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+    ) : null;
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white border rounded-lg p-3 ${isDragging ? "shadow-lg ring-2 ring-primary" : "shadow-sm"}`}
+      className={`bg-white border rounded-lg p-3 ${isDragging ? "shadow-lg" : "shadow-sm"} ${
+        group.status === "success" ? "border-green-200 bg-green-50" : group.status === "error" ? "border-red-200 bg-red-50" : ""
+      }`}
     >
-      <div className="flex gap-3">
-        {/* Drag handle */}
-        <div
-          {...attributes}
-          {...listeners}
-          className="flex items-center justify-center w-6 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
-        >
-          <GripVertical className="h-5 w-5" />
-        </div>
+      <div className="flex items-start gap-2">
+        <button {...attributes} {...listeners} className="mt-1 cursor-grab active:cursor-grabbing" disabled={disabled}>
+          <GripVertical className="h-4 w-4 text-muted-foreground" />
+        </button>
 
-        {/* Media previews */}
-        <div className="flex gap-1 flex-shrink-0">
-          {group.media.slice(0, 3).map((m, i) => (
-            <div key={i} className="relative w-12 h-12">
-              {m.type === "video" ? (
-                <div className="w-full h-full bg-slate-700 rounded flex items-center justify-center">
-                  <Film className="h-5 w-5 text-white" />
+        <div className="flex-1 space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              {group.media.slice(0, 3).map((m) => (
+                <div key={m.id} className="w-8 h-8 rounded overflow-hidden bg-muted">
+                  {m.type === "image" ? (
+                    <img src={m.preview} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Film className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <img src={m.preview} alt="" className="w-full h-full object-cover rounded" />
+              ))}
+              {group.media.length > 3 && (
+                <div className="w-8 h-8 rounded bg-muted flex items-center justify-center text-xs">
+                  +{group.media.length - 3}
+                </div>
               )}
-              <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[8px] text-center truncate px-0.5">
-                {m.aspectRatio}
-              </span>
             </div>
-          ))}
-          {group.media.length > 3 && (
-            <div className="w-12 h-12 bg-muted rounded flex items-center justify-center text-xs text-muted-foreground">
-              +{group.media.length - 3}
-            </div>
-          )}
-        </div>
+            <Input
+              value={group.adName}
+              onChange={(e) => onUpdate("adName", e.target.value)}
+              className="h-7 text-sm font-medium flex-1"
+              placeholder="Ad name"
+              disabled={disabled}
+            />
+            {statusIcon}
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRemove} disabled={disabled}>
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
 
-        {/* Form fields */}
-        <div className="flex-1 grid grid-cols-2 gap-2">
-          <Input
-            value={group.adName}
-            onChange={(e) => onUpdate("adName", e.target.value)}
-            placeholder="Ad Name"
-            disabled={disabled}
-            className="h-8 text-sm"
-          />
-          <Input
-            value={group.url}
-            onChange={(e) => onUpdate("url", e.target.value)}
-            placeholder="URL"
-            disabled={disabled}
-            className="h-8 text-sm"
-          />
-          <Input
-            value={group.primaryText}
-            onChange={(e) => onUpdate("primaryText", e.target.value)}
-            placeholder="Primary Text"
-            disabled={disabled}
-            className="h-8 text-sm"
-          />
-          <Input
-            value={group.headline}
-            onChange={(e) => onUpdate("headline", e.target.value)}
-            placeholder="Headline"
-            disabled={disabled}
-            className="h-8 text-sm"
-          />
-        </div>
+          <div className="grid grid-cols-3 gap-2">
+            <Input
+              value={group.primaryText}
+              onChange={(e) => onUpdate("primaryText", e.target.value)}
+              className="h-7 text-xs"
+              placeholder="Primary text"
+              disabled={disabled}
+            />
+            <Input
+              value={group.headline}
+              onChange={(e) => onUpdate("headline", e.target.value)}
+              className="h-7 text-xs"
+              placeholder="Headline"
+              disabled={disabled}
+            />
+            <Input
+              value={group.url}
+              onChange={(e) => onUpdate("url", e.target.value)}
+              className="h-7 text-xs"
+              placeholder="URL"
+              disabled={disabled}
+            />
+          </div>
 
-        {/* Status & Actions */}
-        <div className="flex flex-col items-end justify-between">
-          <StatusBadge status={group.status} errorMessage={group.errorMessage} />
-          <Button variant="ghost" size="icon" onClick={onRemove} disabled={disabled} className="h-7 w-7">
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {group.errorMessage && <p className="text-xs text-red-500">{group.errorMessage}</p>}
         </div>
       </div>
     </div>
   );
-}
-
-// Status Badge Component
-function StatusBadge({ status, errorMessage }: { status: string; errorMessage?: string }) {
-  switch (status) {
-    case "creating":
-      return (
-        <span className="flex items-center gap-1 text-xs text-blue-600">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Creating
-        </span>
-      );
-    case "success":
-      return (
-        <span className="flex items-center gap-1 text-xs text-green-600">
-          <CheckCircle2 className="h-3 w-3" />
-          Created
-        </span>
-      );
-    case "error":
-      return (
-        <span className="flex items-center gap-1 text-xs text-red-600" title={errorMessage}>
-          <XCircle className="h-3 w-3" />
-          Error
-        </span>
-      );
-    default:
-      return <span className="text-xs text-muted-foreground">Ready</span>;
-  }
 }
 
 // Ad Set Container Component
@@ -277,48 +220,55 @@ function AdSetContainerComponent({
   onUpdateName: (name: string) => void;
   onUpdateAdGroup: (groupId: string, field: keyof AdGroup, value: string) => void;
   onRemoveAdGroup: (groupId: string) => void;
-  disabled: boolean;
+  disabled?: boolean;
 }) {
+  const { setNodeRef, isOver } = useSortable({
+    id: `container-${container.id}`,
+    data: { type: "container", containerId: container.id },
+  });
+
   return (
-    <Card className="border-2 border-dashed border-primary/30 bg-primary/5">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 flex-1">
-            <Input
-              value={container.name}
-              onChange={(e) => onUpdateName(e.target.value)}
-              className="h-8 max-w-xs font-medium"
-              disabled={disabled}
-            />
-            <span className="text-sm text-muted-foreground">({container.adGroups.length} ads)</span>
-            <StatusBadge status={container.status} />
-          </div>
-          <Button variant="ghost" size="icon" onClick={onRemove} disabled={disabled}>
-            <Trash2 className="h-4 w-4" />
+    <Card
+      ref={setNodeRef}
+      className={`${isOver ? "ring-2 ring-primary ring-offset-2" : ""} ${
+        container.status === "success" ? "border-green-300 bg-green-50/50" : container.status === "error" ? "border-red-300" : ""
+      }`}
+    >
+      <CardHeader className="py-2 px-3">
+        <div className="flex items-center gap-2">
+          <Input
+            value={container.name}
+            onChange={(e) => onUpdateName(e.target.value)}
+            className="h-7 text-sm font-medium flex-1"
+            placeholder="Ad Set name"
+            disabled={disabled}
+          />
+          {container.status === "success" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+          {container.status === "error" && <XCircle className="h-4 w-4 text-red-500" />}
+          {container.status === "creating" && <Loader2 className="h-4 w-4 animate-spin" />}
+          <span className="text-xs text-muted-foreground">{container.adGroups.length} ads</span>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRemove} disabled={disabled}>
+            <Trash2 className="h-3 w-3" />
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="min-h-[80px]">
+      <CardContent className="p-2 space-y-2 min-h-[100px]">
         <SortableContext items={container.adGroups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-2">
-            {container.adGroups.length === 0 ? (
-              <div className="border-2 border-dashed rounded-lg p-4 text-center text-muted-foreground text-sm">
-                Drag ads here from the pool
-              </div>
-            ) : (
-              container.adGroups.map((group) => (
-                <DraggableAdGroup
-                  key={group.id}
-                  group={group}
-                  onUpdate={(field, value) => onUpdateAdGroup(group.id, field, value)}
-                  onRemove={() => onRemoveAdGroup(group.id)}
-                  disabled={disabled || group.status !== "idle"}
-                  compact
-                />
-              ))
-            )}
-          </div>
+          {container.adGroups.map((group) => (
+            <DraggableAdGroup
+              key={group.id}
+              group={group}
+              onUpdate={(field, value) => onUpdateAdGroup(group.id, field, value)}
+              onRemove={() => onRemoveAdGroup(group.id)}
+              disabled={disabled}
+            />
+          ))}
         </SortableContext>
+        {container.adGroups.length === 0 && (
+          <div className="h-20 border-2 border-dashed rounded-lg flex items-center justify-center text-muted-foreground text-sm">
+            Drop ads here
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -345,6 +295,11 @@ export default function Home() {
   const [selectedCampaign, setSelectedCampaign] = useState("");
   const [selectedAdSet, setSelectedAdSet] = useState("");
   const [selectedAd, setSelectedAd] = useState("");
+
+  // Show inactive toggles
+  const [showInactiveCampaigns, setShowInactiveCampaigns] = useState(false);
+  const [showInactiveAdSets, setShowInactiveAdSets] = useState(false);
+  const [showInactiveAds, setShowInactiveAds] = useState(false);
 
   // Pool and Ad Sets state
   const [pool, setPool] = useState<AdGroup[]>([]);
@@ -436,21 +391,22 @@ export default function Home() {
     );
   };
 
-  // Get enabled ad accounts for dropdown
+  // Get enabled ad accounts for display
   const enabledAdAccountsList = allAdAccounts.filter((acc) => enabledAdAccounts.includes(acc.id));
+  const selectedAccountName = enabledAdAccountsList.find((acc) => acc.id === selectedAdAccount)?.name || "";
 
   const campaignsQuery = trpc.meta.getCampaigns.useQuery(
-    { accessToken: fbAccessToken || "", adAccountId: selectedAdAccount },
+    { accessToken: fbAccessToken || "", adAccountId: selectedAdAccount, showInactive: showInactiveCampaigns },
     { enabled: !!fbAccessToken && fbConnected && !!selectedAdAccount }
   );
 
   const adSetsQuery = trpc.meta.getAdSets.useQuery(
-    { accessToken: fbAccessToken || "", campaignId: selectedCampaign },
+    { accessToken: fbAccessToken || "", campaignId: selectedCampaign, showInactive: showInactiveAdSets },
     { enabled: !!fbAccessToken && !!selectedCampaign }
   );
 
   const adsQuery = trpc.meta.getAds.useQuery(
-    { accessToken: fbAccessToken || "", adSetId: selectedAdSet },
+    { accessToken: fbAccessToken || "", adSetId: selectedAdSet, showInactive: showInactiveAds },
     { enabled: !!fbAccessToken && !!selectedAdSet }
   );
 
@@ -481,10 +437,23 @@ export default function Home() {
           url: g.url || newTemplate.url,
         }))
       );
+
+      // Update container items with template
+      setAdSetContainers((prev) =>
+        prev.map((c) => ({
+          ...c,
+          adGroups: c.adGroups.map((g) => ({
+            ...g,
+            primaryText: g.primaryText || newTemplate.primaryText,
+            headline: g.headline || newTemplate.headline,
+            url: g.url || newTemplate.url,
+          })),
+        }))
+      );
     }
   }, [adDetailsQuery.data]);
 
-  // Facebook Login
+  // Facebook login
   const handleFacebookLogin = () => {
     const appId = import.meta.env.VITE_FACEBOOK_APP_ID;
     if (!appId) {
@@ -492,106 +461,87 @@ export default function Home() {
       return;
     }
     const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
-    const scope = "ads_management,ads_read,business_management,pages_read_engagement";
-    window.location.href = `https://www.facebook.com/v24.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&response_type=token`;
+    const scope = "ads_management,ads_read,business_management";
+    const url = `https://www.facebook.com/v24.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&response_type=token`;
+    window.location.href = url;
   };
 
-  // Helper functions
-  const generateId = () => Math.random().toString(36).substring(2, 11);
-
-  const getAspectRatio = (filename: string): string => {
-    const lower = filename.toLowerCase();
-    if (lower.includes("9x16") || lower.includes("9_16")) return "9x16";
-    if (lower.includes("4x5") || lower.includes("4_5")) return "4x5";
-    if (lower.includes("1x1") || lower.includes("1_1")) return "1x1";
-    if (lower.includes("16x9") || lower.includes("16_9")) return "16x9";
-    return "other";
-  };
-
-  const getPrefix = (filename: string): string => {
-    const name = filename.replace(/\.[^/.]+$/, "");
-    return name.replace(/[_-]?(9x16|9_16|4x5|4_5|1x1|1_1|16x9|16_9)$/i, "").trim();
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve(result.split(",")[1]);
-      };
-      reader.onerror = reject;
-    });
-  };
-
-  const getVideoThumbnail = (file: File): Promise<string> => {
-    return new Promise((resolve) => {
-      const video = document.createElement("video");
-      video.preload = "metadata";
-      video.onloadeddata = () => {
-        video.currentTime = 1;
-      };
-      video.onseeked = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext("2d")?.drawImage(video, 0, 0);
-        resolve(canvas.toDataURL("image/jpeg"));
-        URL.revokeObjectURL(video.src);
-      };
-      video.onerror = () => resolve("");
-      video.src = URL.createObjectURL(file);
-    });
-  };
-
-  // Handle file upload
-  const handleFiles = useCallback(
-    async (files: FileList) => {
+  // File upload handler
+  const handleFileUpload = useCallback(
+    async (files: FileList | File[]) => {
+      const fileArray = Array.from(files);
       const newMedia: MediaFile[] = [];
 
-      for (const file of Array.from(files)) {
+      for (const file of fileArray) {
         const isVideo = file.type.startsWith("video/");
         const isImage = file.type.startsWith("image/");
-
         if (!isVideo && !isImage) continue;
 
-        const base64 = await fileToBase64(file);
-        const preview = isVideo ? await getVideoThumbnail(file) : URL.createObjectURL(file);
+        // Extract aspect ratio from filename
+        let aspectRatio = "1x1";
+        const name = file.name.toLowerCase();
+        if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
+        else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
+        else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
+        else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+
+        // Get prefix (everything before aspect ratio)
+        const prefix = file.name
+          .replace(/[-_]?(9x16|4x5|1x1|16x9|9_16|4_5|1_1|16_9)[-_]?/gi, "")
+          .replace(/\.[^.]+$/, "")
+          .trim();
+
+        // Create preview
+        const preview = URL.createObjectURL(file);
+
+        // Convert to base64
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
 
         newMedia.push({
-          id: generateId(),
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           file,
           preview,
           name: file.name,
-          aspectRatio: getAspectRatio(file.name),
+          aspectRatio,
           base64,
           type: isVideo ? "video" : "image",
         });
       }
 
       // Group by prefix
-      const groupsMap = new Map<string, MediaFile[]>();
-      newMedia.forEach((m) => {
-        const prefix = getPrefix(m.name);
-        if (!groupsMap.has(prefix)) groupsMap.set(prefix, []);
-        groupsMap.get(prefix)!.push(m);
-      });
+      const groups = new Map<string, MediaFile[]>();
+      for (const media of newMedia) {
+        const prefix = media.name
+          .replace(/[-_]?(9x16|4x5|1x1|16x9|9_16|4_5|1_1|16_9)[-_]?/gi, "")
+          .replace(/\.[^.]+$/, "")
+          .trim();
+        if (!groups.has(prefix)) {
+          groups.set(prefix, []);
+        }
+        groups.get(prefix)!.push(media);
+      }
 
       // Create ad groups
-      const newGroups: AdGroup[] = Array.from(groupsMap.entries()).map(([prefix, media]) => ({
-        id: generateId(),
-        prefix,
-        media,
-        adName: prefix,
-        primaryText: templateData.primaryText,
-        headline: templateData.headline,
-        url: templateData.url,
-        status: "idle",
-      }));
+      const newAdGroups: AdGroup[] = [];
+      groups.forEach((media, prefix) => {
+        newAdGroups.push({
+          id: `group-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          prefix,
+          media,
+          adName: prefix || "New Ad",
+          primaryText: templateData.primaryText,
+          headline: templateData.headline,
+          url: templateData.url,
+          status: "idle",
+        });
+      });
 
-      setPool((prev) => [...prev, ...newGroups]);
-      toast.success(`Added ${newGroups.length} ad group(s)`);
+      setPool((prev) => [...prev, ...newAdGroups]);
+      toast.success(`Added ${newAdGroups.length} ad group(s) to pool`);
     },
     [templateData]
   );
@@ -698,28 +648,22 @@ export default function Home() {
     const actualNumAdSets = Math.min(numAdSets, Math.ceil(totalAds / adsPerAdSet));
 
     const newContainers: AdSetContainer[] = [];
-    let adIndex = 0;
+    let poolCopy = [...pool];
 
     for (let i = 0; i < actualNumAdSets; i++) {
-      const containerAds: AdGroup[] = [];
-      for (let j = 0; j < adsPerAdSet && adIndex < totalAds; j++) {
-        containerAds.push(pool[adIndex]);
-        adIndex++;
+      const adsForThisSet = poolCopy.splice(0, adsPerAdSet);
+      if (adsForThisSet.length > 0) {
+        newContainers.push({
+          id: `container-${Date.now()}-${i}`,
+          name: `Ad Set ${i + 1}`,
+          adGroups: adsForThisSet,
+          status: "idle",
+        });
       }
-
-      newContainers.push({
-        id: generateId(),
-        name: `Ad Set ${adSetContainers.length + i + 1}`,
-        adGroups: containerAds,
-        status: "idle",
-      });
     }
 
-    const remainingAds = pool.slice(adIndex);
-
     setAdSetContainers((prev) => [...prev, ...newContainers]);
-    setPool(remainingAds);
-
+    setPool(poolCopy);
     toast.success(`Created ${newContainers.length} Ad Set(s)`);
   };
 
@@ -728,7 +672,7 @@ export default function Home() {
     setAdSetContainers((prev) => [
       ...prev,
       {
-        id: generateId(),
+        id: `container-${Date.now()}`,
         name: `Ad Set ${prev.length + 1}`,
         adGroups: [],
         status: "idle",
@@ -736,37 +680,29 @@ export default function Home() {
     ]);
   };
 
-  // Update container name
-  const updateContainerName = (containerId: string, name: string) => {
-    setAdSetContainers((prev) => prev.map((c) => (c.id === containerId ? { ...c, name } : c)));
-  };
-
   // Remove container
   const removeContainer = (containerId: string) => {
     const container = adSetContainers.find((c) => c.id === containerId);
     if (container) {
       setPool((prev) => [...prev, ...container.adGroups]);
+      setAdSetContainers((prev) => prev.filter((c) => c.id !== containerId));
     }
-    setAdSetContainers((prev) => prev.filter((c) => c.id !== containerId));
   };
 
-  // Update ad group in pool
-  const updatePoolGroup = (groupId: string, field: keyof AdGroup, value: string) => {
-    setPool((prev) => prev.map((g) => (g.id === groupId ? { ...g, [field]: value } : g)));
+  // Update container name
+  const updateContainerName = (containerId: string, name: string) => {
+    setAdSetContainers((prev) => prev.map((c) => (c.id === containerId ? { ...c, name } : c)));
   };
 
   // Update ad group in container
   const updateContainerGroup = (containerId: string, groupId: string, field: keyof AdGroup, value: string) => {
     setAdSetContainers((prev) =>
       prev.map((c) =>
-        c.id === containerId ? { ...c, adGroups: c.adGroups.map((g) => (g.id === groupId ? { ...g, [field]: value } : g)) } : c
+        c.id === containerId
+          ? { ...c, adGroups: c.adGroups.map((g) => (g.id === groupId ? { ...g, [field]: value } : g)) }
+          : c
       )
     );
-  };
-
-  // Remove ad group from pool
-  const removePoolGroup = (groupId: string) => {
-    setPool((prev) => prev.filter((g) => g.id !== groupId));
   };
 
   // Remove ad group from container
@@ -776,46 +712,48 @@ export default function Home() {
     );
   };
 
-  // Get scheduled time in ISO format (Europe/Bucharest timezone)
-  const getScheduledTime = (): string | undefined => {
-    if (!scheduleEnabled || !scheduleDate || !scheduleTime) return undefined;
-    // Create date in Bucharest timezone
-    const dateTimeStr = `${scheduleDate}T${scheduleTime}:00`;
-    const date = new Date(dateTimeStr);
-    // Adjust for Bucharest timezone (UTC+2 or UTC+3 depending on DST)
-    return date.toISOString();
+  // Update pool group
+  const updatePoolGroup = (groupId: string, field: keyof AdGroup, value: string) => {
+    setPool((prev) => prev.map((g) => (g.id === groupId ? { ...g, [field]: value } : g)));
+  };
+
+  // Remove pool group
+  const removePoolGroup = (groupId: string) => {
+    setPool((prev) => prev.filter((g) => g.id !== groupId));
   };
 
   // Create all ads
   const handleCreateAll = async () => {
-    if (!fbAccessToken || !selectedAd) {
-      toast.error("Please connect Facebook and select a template");
+    if (!selectedAd || !selectedAdSet || !fbAccessToken) {
+      toast.error("Please select a template ad first");
       return;
     }
 
-    const containersToCreate = adSetContainers.filter((c) => c.adGroups.length > 0 && c.status !== "success");
-    if (containersToCreate.length === 0) {
-      toast.error("No Ad Sets with ads to create");
+    const containersWithAds = adSetContainers.filter((c) => c.adGroups.length > 0);
+    if (containersWithAds.length === 0) {
+      toast.error("No ads to create. Distribute ads to Ad Sets first.");
       return;
     }
 
     setIsCreating(true);
 
-    for (const container of containersToCreate) {
-      setAdSetContainers((prev) =>
-        prev.map((c) =>
-          c.id === container.id
-            ? { ...c, status: "creating", adGroups: c.adGroups.map((g) => ({ ...g, status: "creating" })) }
-            : c
-        )
-      );
+    // Calculate schedule time if enabled
+    let scheduledTime: number | undefined;
+    if (scheduleEnabled && scheduleDate && scheduleTime) {
+      const bucharestDate = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      // Bucharest is UTC+2 (or UTC+3 in summer)
+      scheduledTime = Math.floor(bucharestDate.getTime() / 1000);
+    }
+
+    for (const container of containersWithAds) {
+      // Update container status
+      setAdSetContainers((prev) => prev.map((c) => (c.id === container.id ? { ...c, status: "creating" } : c)));
 
       try {
         const result = await batchCreateAdsMutation.mutateAsync({
           accessToken: fbAccessToken,
           templateAdId: selectedAd,
           newAdSetName: container.name,
-          scheduledTime: getScheduledTime(),
           ads: container.adGroups.map((g) => ({
             adName: g.adName,
             primaryText: g.primaryText,
@@ -823,29 +761,31 @@ export default function Home() {
             url: g.url,
             media: g.media.map((m) => ({
               filename: m.name,
-              aspectRatio: m.aspectRatio,
-              base64: m.base64,
+              base64: m.base64.split(',')[1] || m.base64,
               type: m.type,
+              aspectRatio: m.aspectRatio,
             })),
           })),
+          scheduledTime: scheduledTime ? new Date(scheduledTime * 1000).toISOString() : undefined,
         });
+
+        // Update container and ad statuses
+        const updatedGroups = container.adGroups.map((g, idx) => {
+          const adResult = result.results[idx];
+          return {
+            ...g,
+            status: adResult?.success ? ("success" as const) : ("error" as const),
+            adId: adResult?.adId,
+            errorMessage: adResult?.error,
+          };
+        });
+
+        const allSuccess = updatedGroups.every((g) => g.status === "success");
+        const hasError = updatedGroups.some((g) => g.status === "error");
 
         setAdSetContainers((prev) =>
           prev.map((c) => {
             if (c.id !== container.id) return c;
-
-            const updatedGroups = c.adGroups.map((g) => {
-              const res = result.results.find((r) => r.adName === g.adName);
-              if (res?.success) {
-                return { ...g, status: "success" as const, adId: res.adId };
-              } else {
-                return { ...g, status: "error" as const, errorMessage: res?.error || "Unknown error" };
-              }
-            });
-
-            const allSuccess = updatedGroups.every((g) => g.status === "success");
-            const hasError = updatedGroups.some((g) => g.status === "error");
-
             return {
               ...c,
               status: allSuccess ? "success" : hasError ? "error" : "idle",
@@ -909,6 +849,31 @@ export default function Home() {
             <div className="flex items-center gap-3">
               {fbConnected ? (
                 <>
+                  {/* Ad Account Selector in Header */}
+                  {selectedAdAccount && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-sm font-medium text-green-700">{selectedAccountName || selectedAdAccount}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 text-green-600 hover:text-green-800 hover:bg-green-100"
+                        onClick={() => setShowAdAccountModal(true)}
+                      >
+                        <Settings className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                  {!selectedAdAccount && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAdAccountModal(true)}
+                      className="text-muted-foreground"
+                    >
+                      Select Ad Account
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -938,7 +903,7 @@ export default function Home() {
         </header>
 
         <main className="container py-6 space-y-6">
-          {/* Step 1: Template Selection */}
+          {/* Step 1: Template Selection - 3 Column Layout */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -948,82 +913,167 @@ export default function Home() {
                 Select Template Ad
               </CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-4 gap-3">
-              <Select
-                value={selectedAdAccount}
-                onValueChange={(v) => {
-                  setSelectedAdAccount(v);
-                  setSelectedCampaign("");
-                  setSelectedAdSet("");
-                  setSelectedAd("");
-                }}
-                disabled={!fbConnected || enabledAdAccountsList.length === 0}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Ad Account..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {enabledAdAccountsList.map((acc) => (
-                    <SelectItem key={acc.id} value={acc.id}>
-                      {acc.name || acc.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <CardContent>
+              {!fbConnected || !selectedAdAccount ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  {!fbConnected ? "Connect Facebook to see your campaigns" : "Select an Ad Account from the header"}
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-4 h-[400px]">
+                  {/* Column 1: Campaigns */}
+                  <div className="border rounded-lg flex flex-col">
+                    <div className="p-2 border-b bg-muted/50 flex items-center justify-between">
+                      <span className="text-sm font-medium">Campaigns</span>
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                        <Checkbox
+                          checked={showInactiveCampaigns}
+                          onCheckedChange={(checked) => setShowInactiveCampaigns(!!checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        {showInactiveCampaigns ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                        Inactive
+                      </label>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="p-2 space-y-1">
+                        {campaignsQuery.isLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          </div>
+                        ) : campaigns.length === 0 ? (
+                          <p className="text-xs text-muted-foreground text-center py-4">No campaigns found</p>
+                        ) : (
+                          campaigns.map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => {
+                                setSelectedCampaign(c.id);
+                                setSelectedAdSet("");
+                                setSelectedAd("");
+                              }}
+                              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                                selectedCampaign === c.id
+                                  ? "bg-primary text-primary-foreground"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              <div className="font-medium truncate">{c.name}</div>
+                              <div className="text-xs opacity-70">{c.status}</div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
 
-              <Select
-                value={selectedCampaign}
-                onValueChange={(v) => {
-                  setSelectedCampaign(v);
-                  setSelectedAdSet("");
-                  setSelectedAd("");
-                }}
-                disabled={!fbConnected || !selectedAdAccount}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Campaign..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {campaigns.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  {/* Column 2: Ad Sets */}
+                  <div className="border rounded-lg flex flex-col">
+                    <div className="p-2 border-b bg-muted/50 flex items-center justify-between">
+                      <span className="text-sm font-medium">Ad Sets</span>
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                        <Checkbox
+                          checked={showInactiveAdSets}
+                          onCheckedChange={(checked) => setShowInactiveAdSets(!!checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        {showInactiveAdSets ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                        Inactive
+                      </label>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="p-2 space-y-1">
+                        {!selectedCampaign ? (
+                          <p className="text-xs text-muted-foreground text-center py-4">Select a campaign first</p>
+                        ) : adSetsQuery.isLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          </div>
+                        ) : adSets.length === 0 ? (
+                          <p className="text-xs text-muted-foreground text-center py-4">No ad sets found</p>
+                        ) : (
+                          adSets.map((a) => (
+                            <button
+                              key={a.id}
+                              onClick={() => {
+                                setSelectedAdSet(a.id);
+                                setSelectedAd("");
+                              }}
+                              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                                selectedAdSet === a.id
+                                  ? "bg-primary text-primary-foreground"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              <div className="font-medium truncate">{a.name}</div>
+                              <div className="text-xs opacity-70">{a.status}</div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
 
-              <Select
-                value={selectedAdSet}
-                onValueChange={(v) => {
-                  setSelectedAdSet(v);
-                  setSelectedAd("");
-                }}
-                disabled={!selectedCampaign}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Ad Set..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {adSets.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={selectedAd} onValueChange={setSelectedAd} disabled={!selectedAdSet}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Ad..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {ads.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  {/* Column 3: Ads with Thumbnails */}
+                  <div className="border rounded-lg flex flex-col">
+                    <div className="p-2 border-b bg-muted/50 flex items-center justify-between">
+                      <span className="text-sm font-medium">Ads</span>
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                        <Checkbox
+                          checked={showInactiveAds}
+                          onCheckedChange={(checked) => setShowInactiveAds(!!checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        {showInactiveAds ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                        Inactive
+                      </label>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      <div className="p-2 space-y-1">
+                        {!selectedAdSet ? (
+                          <p className="text-xs text-muted-foreground text-center py-4">Select an ad set first</p>
+                        ) : adsQuery.isLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          </div>
+                        ) : ads.length === 0 ? (
+                          <p className="text-xs text-muted-foreground text-center py-4">No ads found</p>
+                        ) : (
+                          ads.map((a) => (
+                            <button
+                              key={a.id}
+                              onClick={() => setSelectedAd(a.id)}
+                              className={`w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
+                                selectedAd === a.id
+                                  ? "bg-primary text-primary-foreground"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              {/* Thumbnail */}
+                              <div className="w-10 h-10 rounded overflow-hidden bg-muted flex-shrink-0">
+                                {a.creative?.thumbnail_url || a.creative?.image_url ? (
+                                  <img
+                                    src={a.creative.thumbnail_url || a.creative.image_url}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <ImagePlus className="h-4 w-4 text-muted-foreground" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium truncate">{a.name}</div>
+                                <div className="text-xs opacity-70">{a.status}</div>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -1048,6 +1098,8 @@ export default function Home() {
                       onChange={(e) => setNumAdSets(parseInt(e.target.value) || 1)}
                       className="h-7 w-16 text-sm"
                     />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
                     <Label className="text-xs text-muted-foreground">Ads/Set:</Label>
                     <Input
                       type="number"
@@ -1069,58 +1121,48 @@ export default function Home() {
               </div>
             </CardHeader>
             <CardContent>
+              {/* Upload Zone / Pool */}
               <div
                 id="pool-drop-zone"
-                className="min-h-[150px] border-2 border-dashed rounded-lg p-3 transition-all"
-                onDragOver={(e) => e.preventDefault()}
+                className="border-2 border-dashed rounded-lg p-4 min-h-[200px] transition-colors hover:border-primary/50"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.add("border-primary", "bg-primary/5");
+                }}
+                onDragLeave={(e) => {
+                  e.currentTarget.classList.remove("border-primary", "bg-primary/5");
+                }}
                 onDrop={(e) => {
                   e.preventDefault();
-                  if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+                  e.currentTarget.classList.remove("border-primary", "bg-primary/5");
+                  if (e.dataTransfer.files.length > 0) {
+                    handleFileUpload(e.dataTransfer.files);
+                  }
                 }}
               >
                 {pool.length === 0 ? (
-                  <div
-                    className="flex flex-col items-center justify-center py-8 cursor-pointer hover:bg-muted/50 rounded-lg transition-colors"
-                    onClick={() => document.getElementById("file-upload")?.click()}
-                  >
-                    <div className="flex items-center gap-3 mb-2">
-                      <ImagePlus className="h-8 w-8 text-muted-foreground" />
-                      <Film className="h-8 w-8 text-muted-foreground" />
+                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+                    <div className="flex gap-2 mb-2">
+                      <ImagePlus className="h-8 w-8" />
+                      <Film className="h-8 w-8" />
                     </div>
-                    <p className="text-sm font-medium">Drop images & videos here</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Name files like: product_9x16.jpg, product_4x5.mp4
-                    </p>
+                    <p className="font-medium">Drop images & videos here</p>
+                    <p className="text-xs">Name files like: product_9x16.jpg, product_4x5.mp4</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <SortableContext items={pool.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+                  <SortableContext items={pool.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {pool.map((group) => (
                         <DraggableAdGroup
                           key={group.id}
                           group={group}
                           onUpdate={(field, value) => updatePoolGroup(group.id, field, value)}
                           onRemove={() => removePoolGroup(group.id)}
-                          disabled={false}
                         />
                       ))}
-                    </SortableContext>
-                    <div
-                      className="border-2 border-dashed rounded-lg p-3 text-center cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => document.getElementById("file-upload")?.click()}
-                    >
-                      <span className="text-sm text-muted-foreground">+ Add more media</span>
                     </div>
-                  </div>
+                  </SortableContext>
                 )}
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,video/*"
-                  onChange={(e) => e.target.files && handleFiles(e.target.files)}
-                  className="hidden"
-                  id="file-upload"
-                />
               </div>
             </CardContent>
           </Card>
@@ -1136,18 +1178,15 @@ export default function Home() {
                     </span>
                     Ad Sets ({adSetContainers.length})
                   </CardTitle>
-                  {/* Schedule Option */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="schedule-toggle"
+                      <Checkbox
+                        id="schedule"
                         checked={scheduleEnabled}
-                        onChange={(e) => setScheduleEnabled(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300"
+                        onCheckedChange={(checked) => setScheduleEnabled(!!checked)}
                       />
-                      <Label htmlFor="schedule-toggle" className="text-sm flex items-center gap-1 cursor-pointer">
-                        <Clock className="h-4 w-4" />
+                      <Label htmlFor="schedule" className="text-sm flex items-center gap-1 cursor-pointer">
+                        <Calendar className="h-3.5 w-3.5" />
                         Schedule
                       </Label>
                     </div>
@@ -1245,7 +1284,9 @@ export default function Home() {
             {allAdAccounts.map((acc) => (
               <div
                 key={acc.id}
-                className="flex items-center space-x-3 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
+                className={`flex items-center space-x-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  enabledAdAccounts.includes(acc.id) ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                }`}
                 onClick={() => toggleAdAccount(acc.id)}
               >
                 <Checkbox
@@ -1262,6 +1303,27 @@ export default function Home() {
               <p className="text-center text-muted-foreground py-4">No Ad Accounts found</p>
             )}
           </div>
+          {/* Select active account */}
+          {enabledAdAccounts.length > 0 && (
+            <div className="border-t pt-4">
+              <Label className="text-sm font-medium mb-2 block">Active Account:</Label>
+              <div className="space-y-1">
+                {enabledAdAccountsList.map((acc) => (
+                  <button
+                    key={acc.id}
+                    onClick={() => setSelectedAdAccount(acc.id)}
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                      selectedAdAccount === acc.id
+                        ? "bg-green-100 text-green-800 border border-green-300"
+                        : "hover:bg-muted"
+                    }`}
+                  >
+                    {acc.name || acc.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button
               onClick={() => {

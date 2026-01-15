@@ -59,6 +59,7 @@ describe("meta.getCampaigns", () => {
 
     const result = await caller.meta.getCampaigns({
       accessToken: "test-token",
+      showInactive: true,
     });
 
     expect(result).toHaveLength(2);
@@ -101,6 +102,7 @@ describe("meta.getAdSets", () => {
     const result = await caller.meta.getAdSets({
       accessToken: "test-token",
       campaignId: "campaign_123",
+      showInactive: true,
     });
 
     expect(result).toHaveLength(2);
@@ -129,6 +131,7 @@ describe("meta.getAds", () => {
     const result = await caller.meta.getAds({
       accessToken: "test-token",
       adSetId: "adset_123",
+      showInactive: true,
     });
 
     expect(result).toHaveLength(2);

@@ -86,7 +86,7 @@ export const appRouter = router({
 
     // Get campaigns for an ad account
     getCampaigns: protectedProcedure
-      .input(z.object({ accessToken: z.string(), adAccountId: z.string().optional() }))
+      .input(z.object({ accessToken: z.string(), adAccountId: z.string().optional(), showInactive: z.boolean().optional() }))
       .query(async ({ input }) => {
         // First get ad accounts if not provided
         let adAccountId = input.adAccountId;
@@ -103,18 +103,23 @@ export const appRouter = router({
           `/${adAccountId}/campaigns?fields=id,name,status,objective&limit=100`,
           input.accessToken
         );
-        return data.data as Array<{ id: string; name: string; status: string; objective: string }>;
+        let campaigns = data.data as Array<{ id: string; name: string; status: string; objective: string }>;
+        // Filter inactive if not requested
+        if (!input.showInactive) {
+          campaigns = campaigns.filter(c => c.status === 'ACTIVE');
+        }
+        return campaigns;
       }),
 
     // Get ad sets for a campaign
     getAdSets: protectedProcedure
-      .input(z.object({ accessToken: z.string(), campaignId: z.string() }))
+      .input(z.object({ accessToken: z.string(), campaignId: z.string(), showInactive: z.boolean().optional() }))
       .query(async ({ input }) => {
         const data = await metaApiRequest(
           `/${input.campaignId}/adsets?fields=id,name,status,daily_budget,lifetime_budget,targeting&limit=100`,
           input.accessToken
         );
-        return data.data as Array<{
+        let adSets = data.data as Array<{
           id: string;
           name: string;
           status: string;
@@ -122,22 +127,32 @@ export const appRouter = router({
           lifetime_budget?: string;
           targeting?: unknown;
         }>;
+        // Filter inactive if not requested
+        if (!input.showInactive) {
+          adSets = adSets.filter(a => a.status === 'ACTIVE');
+        }
+        return adSets;
       }),
 
     // Get ads for an ad set
     getAds: protectedProcedure
-      .input(z.object({ accessToken: z.string(), adSetId: z.string() }))
+      .input(z.object({ accessToken: z.string(), adSetId: z.string(), showInactive: z.boolean().optional() }))
       .query(async ({ input }) => {
         const data = await metaApiRequest(
-          `/${input.adSetId}/ads?fields=id,name,status,creative&limit=100`,
+          `/${input.adSetId}/ads?fields=id,name,status,creative{id,thumbnail_url,image_url}&limit=100`,
           input.accessToken
         );
-        return data.data as Array<{
+        let ads = data.data as Array<{
           id: string;
           name: string;
           status: string;
-          creative?: { id: string };
+          creative?: { id: string; thumbnail_url?: string; image_url?: string };
         }>;
+        // Filter inactive if not requested
+        if (!input.showInactive) {
+          ads = ads.filter(a => a.status === 'ACTIVE');
+        }
+        return ads;
       }),
 
     // Get ad details including creative

@@ -88,3 +88,23 @@
 - [x] Pass scheduled_publish_time to Meta API when creating ads
 - [x] Show scheduled time in Create button
 - [x] Remove orange color from Pool icon - use consistent design
+
+## UI Refactor - Select Template Ad
+
+### Ad Account in Header
+- [x] Move Ad Account selector from Step 1 to header (right side)
+- [x] Show green indicator when Ad Account is selected
+- [x] Keep Ad Account selection persistent while working
+
+### 3-Column Layout for Template Selection
+- [x] Replace dropdowns with 3-column scrollable layout
+- [x] Column 1: Campaigns list (click to select)
+- [x] Column 2: Ad Sets list (appears after campaign selection)
+- [x] Column 3: Ads list with thumbnails on the left
+- [x] Each column has its own scrollbar
+
+### Show Inactive Toggles
+- [x] Add "Show Inactive" checkbox for Campaigns column
+- [x] Add "Show Inactive" checkbox for Ad Sets column
+- [x] Add "Show Inactive" checkbox for Ads column
+- [x] Filter items based on status when toggle is off
