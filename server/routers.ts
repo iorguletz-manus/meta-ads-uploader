@@ -798,7 +798,21 @@ export const appRouter = router({
             const images = ad.media.filter(m => m.type === "image");
             const videos = ad.media.filter(m => m.type === "video");
             
-            console.log(`[BATCH] Images: ${images.length}, Videos: ${videos.length}`);
+            console.log("\n" + "#".repeat(100));
+            console.log("[BATCH] ############## STARTING AD CREATION PROCESS ##############");
+            console.log("[BATCH] Ad name:", ad.adName);
+            console.log("[BATCH] Primary text:", ad.primaryText?.substring(0, 50) + "...");
+            console.log("[BATCH] Headline:", ad.headline);
+            console.log("[BATCH] URL:", ad.url);
+            console.log("[BATCH] Total media items:", ad.media?.length);
+            console.log("[BATCH] Images count:", images.length);
+            console.log("[BATCH] Videos count:", videos.length);
+            
+            // Log each media item
+            ad.media?.forEach((m, i) => {
+              console.log(`[BATCH] Media[${i}]: filename=${m.filename}, type=${m.type}, aspectRatio=${m.aspectRatio}, base64Length=${m.base64?.length || 0}`);
+            });
+            console.log("#".repeat(100) + "\n");
             
             // Upload images
             const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
@@ -824,19 +838,36 @@ export const appRouter = router({
               
               if (!imageResponse.ok) {
                 const errorText = await imageResponse.text();
-                console.error(`[BATCH] Image upload failed: ${errorText}`);
+                console.error("\n" + "=".repeat(100));
+                console.error("[IMAGE UPLOAD ERROR] ============= FULL ERROR DETAILS =============");
+                console.error("[IMAGE UPLOAD ERROR] Response status:", imageResponse.status);
+                console.error("[IMAGE UPLOAD ERROR] Raw response:", errorText);
                 let error;
                 try {
                   error = JSON.parse(errorText);
+                  console.error("[IMAGE UPLOAD ERROR] Parsed error:");
+                  console.error("[IMAGE UPLOAD ERROR]   message:", error.error?.message);
+                  console.error("[IMAGE UPLOAD ERROR]   code:", error.error?.code);
+                  console.error("[IMAGE UPLOAD ERROR]   error_subcode:", error.error?.error_subcode);
+                  console.error("[IMAGE UPLOAD ERROR]   error_user_msg:", error.error?.error_user_msg);
+                  console.error("[IMAGE UPLOAD ERROR]   fbtrace_id:", error.error?.fbtrace_id);
                 } catch {
                   error = { error: { message: errorText } };
                 }
-                throw new Error(`Failed to upload image: ${error.error?.message || "Unknown error"}`);
+                console.error("[IMAGE UPLOAD ERROR] Image filename:", image.filename);
+                console.error("[IMAGE UPLOAD ERROR] Base64 length:", image.base64?.length);
+                console.error("=".repeat(100) + "\n");
+                throw new Error(`Failed to upload image: ${error.error?.error_user_msg || error.error?.message || "Unknown error"}`);
               }
               
               const imageResult = await imageResponse.json();
               const imageKey = Object.keys(imageResult.images)[0];
-              console.log(`[BATCH] Image uploaded successfully: hash=${imageResult.images[imageKey].hash}`);
+              console.log("\n" + "=".repeat(80));
+              console.log("[IMAGE UPLOAD SUCCESS]");
+              console.log("[IMAGE UPLOAD SUCCESS] Filename:", image.filename);
+              console.log("[IMAGE UPLOAD SUCCESS] Image hash:", imageResult.images[imageKey].hash);
+              console.log("[IMAGE UPLOAD SUCCESS] Full response:", JSON.stringify(imageResult, null, 2));
+              console.log("=".repeat(80) + "\n");
               uploadedImages.push({
                 hash: imageResult.images[imageKey].hash,
                 aspectRatio: image.aspectRatio,
@@ -948,20 +979,51 @@ export const appRouter = router({
             
             if (!creativeResponse.ok) {
               const errorText = await creativeResponse.text();
-              console.error("=" .repeat(80));
+              console.error("\n" + "=".repeat(100));
+              console.error("[CREATIVE ERROR] ============= FULL ERROR DETAILS =============");
               console.error("[CREATIVE ERROR] Response status:", creativeResponse.status);
-              console.error("[CREATIVE ERROR] Response text:", errorText);
-              console.error("[CREATIVE ERROR] Creative data sent:");
-              console.error("[CREATIVE ERROR]   name:", creativeData.name);
-              console.error("[CREATIVE ERROR]   object_story_spec:", creativeData.object_story_spec);
-              console.error("=" .repeat(80));
+              console.error("[CREATIVE ERROR] Response headers:", JSON.stringify(Object.fromEntries(creativeResponse.headers.entries()), null, 2));
+              console.error("[CREATIVE ERROR] Raw response text:", errorText);
+              
               let error;
               try {
                 error = JSON.parse(errorText);
+                console.error("[CREATIVE ERROR] Parsed error object:");
+                console.error("[CREATIVE ERROR]   message:", error.error?.message);
+                console.error("[CREATIVE ERROR]   type:", error.error?.type);
+                console.error("[CREATIVE ERROR]   code:", error.error?.code);
+                console.error("[CREATIVE ERROR]   error_subcode:", error.error?.error_subcode);
+                console.error("[CREATIVE ERROR]   error_user_title:", error.error?.error_user_title);
+                console.error("[CREATIVE ERROR]   error_user_msg:", error.error?.error_user_msg);
+                console.error("[CREATIVE ERROR]   fbtrace_id:", error.error?.fbtrace_id);
+                console.error("[CREATIVE ERROR]   is_transient:", error.error?.is_transient);
               } catch {
                 error = { error: { message: errorText } };
               }
-              throw new Error(`Failed to create creative: ${error.error?.message || JSON.stringify(error)}`);
+              
+              console.error("[CREATIVE ERROR] ============= REQUEST DATA SENT =============");
+              console.error("[CREATIVE ERROR] Endpoint:", `${META_API_BASE}/${adAccountId}/adcreatives`);
+              console.error("[CREATIVE ERROR] Creative name:", creativeData.name);
+              console.error("[CREATIVE ERROR] object_story_spec (raw):", creativeData.object_story_spec);
+              try {
+                const parsedSpec = JSON.parse(creativeData.object_story_spec);
+                console.error("[CREATIVE ERROR] object_story_spec (parsed):", JSON.stringify(parsedSpec, null, 2));
+                console.error("[CREATIVE ERROR]   page_id:", parsedSpec.page_id);
+                if (parsedSpec.link_data) {
+                  console.error("[CREATIVE ERROR]   link_data.message:", parsedSpec.link_data.message?.substring(0, 100) + "...");
+                  console.error("[CREATIVE ERROR]   link_data.name:", parsedSpec.link_data.name);
+                  console.error("[CREATIVE ERROR]   link_data.link:", parsedSpec.link_data.link);
+                  console.error("[CREATIVE ERROR]   link_data.image_hash:", parsedSpec.link_data.image_hash);
+                  console.error("[CREATIVE ERROR]   link_data.call_to_action:", JSON.stringify(parsedSpec.link_data.call_to_action));
+                }
+              } catch (e) {
+                console.error("[CREATIVE ERROR] Could not parse object_story_spec");
+              }
+              console.error("=".repeat(100) + "\n");
+              
+              // Build detailed error message
+              const errorDetails = error.error?.error_user_msg || error.error?.message || JSON.stringify(error);
+              throw new Error(`Failed to create creative: ${errorDetails}`);
             }
             
             const newCreative = await creativeResponse.json();
