@@ -386,3 +386,9 @@
 ### UI Changes
 - [x] Iconița Google Drive - mutată deasupra border-ului dashed
 - [x] Text "Import from Google Drive" lângă iconiță
+
+
+## UI Improvements - Round 19
+
+- [x] Micșorare padding/margin la Card-uri (Step 1-6) - sub titlu și deasupra
+- [x] Buton "Create All" → "PUBLISH ALL" - mare, triplu înălțime, centrat pe pagină, gradient albastru-mov

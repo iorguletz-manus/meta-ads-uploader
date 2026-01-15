@@ -1330,10 +1330,10 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="app-container py-4 space-y-4">
+      <main className="app-container py-2 space-y-2">
         {/* Step 1: Select Template Ad */}
         <Card>
-          <CardHeader className="py-2 px-4">
+          <CardHeader className="py-1 px-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                 1
@@ -1341,7 +1341,7 @@ export default function Home() {
               Select Template Ad
             </CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-3">
+          <CardContent className="px-3 pb-2">
             {!fbConnected || !selectedAdAccount ? (
               <div className="text-center py-6 text-muted-foreground text-sm">
                 {!fbConnected ? "Connect Facebook to see your campaigns" : "Select an Ad Account from the header"}
@@ -1536,7 +1536,7 @@ export default function Home() {
 
         {/* Step 2: Upload Media */}
         <Card>
-          <CardHeader className="py-2 px-4">
+          <CardHeader className="py-1 px-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                 2
@@ -1547,7 +1547,7 @@ export default function Home() {
               )}
             </CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-3">
+          <CardContent className="px-3 pb-2">
             {/* Google Drive Import Button - Above Upload Zone */}
             <button
               className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 hover:bg-muted transition-colors text-xs text-muted-foreground hover:text-foreground"
@@ -1661,7 +1661,7 @@ export default function Home() {
 
         {/* Step 3: Establish Nr of Adsets */}
         <Card>
-          <CardHeader className="py-2 px-4">
+          <CardHeader className="py-1 px-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
                 3
@@ -1669,7 +1669,7 @@ export default function Home() {
               Establish Nr of Adsets
             </CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-3 space-y-3">
+          <CardContent className="px-3 pb-2 space-y-2">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <Label className="text-xs">Ad Sets:</Label>
@@ -1714,7 +1714,7 @@ export default function Home() {
         {/* Step 4: Preview (only shown after Distribute) */}
         {showPreview && adSetsPreview.length > 0 && (
           <Card>
-            <CardHeader className="py-2 px-4">
+            <CardHeader className="py-1 px-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
@@ -1727,7 +1727,7 @@ export default function Home() {
                 </CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="px-4 pb-3 space-y-3">
+            <CardContent className="px-3 pb-2 space-y-2">
               {adSetsPreview.map((adSet, index) => (
                 <Card
                   key={adSet.id}
@@ -1739,7 +1739,7 @@ export default function Home() {
                       : ""
                   }`}
                 >
-                  <CardHeader className="py-2 px-3">
+                  <CardHeader className="py-1 px-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 flex-1">
                         <Button
@@ -1813,7 +1813,7 @@ export default function Home() {
                   </CardHeader>
 
                   {adSet.isExpanded && (
-                    <CardContent className="pt-0 px-3 pb-3">
+                    <CardContent className="pt-0 px-2 pb-2">
                       <div className="space-y-2">
                         {/* Ads list */}
                         {adSet.ads.map((ad, adIndex) => (
@@ -1969,56 +1969,62 @@ export default function Home() {
                 </Card>
               ))}
 
-              {/* Global Schedule + Create All */}
-              <div className="border-t pt-3 mt-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1.5">
-                      <Checkbox
-                        checked={globalScheduleEnabled}
-                        onCheckedChange={(checked) => setGlobalScheduleEnabled(!!checked)}
-                        className="h-3 w-3"
-                      />
-                      <Label className="text-xs flex items-center gap-1 cursor-pointer">
-                        <Calendar className="h-3 w-3" />
-                        Schedule All
-                      </Label>
-                    </div>
-                    {globalScheduleEnabled && (
-                      <>
-                        <Input
-                          type="date"
-                          value={globalScheduleDate}
-                          onChange={(e) => setGlobalScheduleDate(e.target.value)}
-                          className="h-6 w-32 text-xs"
-                        />
-                        <Input
-                          type="time"
-                          value={globalScheduleTime}
-                          onChange={(e) => setGlobalScheduleTime(e.target.value)}
-                          className="h-6 w-24 text-xs"
-                        />
-                        <span className="text-[10px] text-muted-foreground">(București)</span>
-                        <Button size="sm" variant="outline" className="h-6 text-xs" onClick={applyGlobalSchedule}>
-                          Apply to All
-                        </Button>
-                      </>
-                    )}
+              {/* Global Schedule */}
+              <div className="border-t pt-2 mt-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={globalScheduleEnabled}
+                      onCheckedChange={(checked) => setGlobalScheduleEnabled(!!checked)}
+                      className="h-3 w-3"
+                    />
+                    <Label className="text-xs flex items-center gap-1 cursor-pointer">
+                      <Calendar className="h-3 w-3" />
+                      Schedule All
+                    </Label>
                   </div>
-                  <Button size="sm" onClick={handleCreateAll} disabled={!selectedAd || isCreating} className="h-7">
-                    {isCreating ? (
-                      <>
-                        <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="h-3 w-3 mr-1.5" />
-                        Create All ({adSetsPreview.length} Ad Sets)
-                      </>
-                    )}
-                  </Button>
+                  {globalScheduleEnabled && (
+                    <>
+                      <Input
+                        type="date"
+                        value={globalScheduleDate}
+                        onChange={(e) => setGlobalScheduleDate(e.target.value)}
+                        className="h-6 w-32 text-xs"
+                      />
+                      <Input
+                        type="time"
+                        value={globalScheduleTime}
+                        onChange={(e) => setGlobalScheduleTime(e.target.value)}
+                        className="h-6 w-24 text-xs"
+                      />
+                      <span className="text-[10px] text-muted-foreground">(București)</span>
+                      <Button size="sm" variant="outline" className="h-6 text-xs" onClick={applyGlobalSchedule}>
+                        Apply to All
+                      </Button>
+                    </>
+                  )}
                 </div>
+              </div>
+
+              {/* PUBLISH ALL Button - Large, Centered */}
+              <div className="flex justify-center pt-4 pb-2">
+                <Button 
+                  onClick={handleCreateAll} 
+                  disabled={!selectedAd || isCreating} 
+                  className="h-16 px-12 text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all"
+                >
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="h-6 w-6 mr-3 animate-spin" />
+                      PUBLISHING...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-6 w-6 mr-3" />
+                      PUBLISH ALL ({adSetsPreview.length} Ad Sets, {totalAdsInPreview} Ads)
+                    </>
+                  )}
+                </Button>
               </div>
             </CardContent>
           </Card>
