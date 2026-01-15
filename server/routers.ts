@@ -493,15 +493,17 @@ export const appRouter = router({
         accessToken: z.string(),
         templateAdId: z.string(),
         newAdSetName: z.string(),
+        scheduledTime: z.string().optional(), // ISO timestamp for scheduled publish
         ads: z.array(z.object({
           adName: z.string(),
           primaryText: z.string(),
           headline: z.string(),
           url: z.string(),
-          images: z.array(z.object({
+          media: z.array(z.object({
             filename: z.string(),
             aspectRatio: z.string(),
             base64: z.string(),
+            type: z.enum(["image", "video"]),
           })),
         })),
       }))
@@ -581,10 +583,13 @@ export const appRouter = router({
         
         for (const ad of input.ads) {
           try {
-            // Upload images for this ad
-            const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
+            // Separate images and videos
+            const images = ad.media.filter(m => m.type === "image");
+            const videos = ad.media.filter(m => m.type === "video");
             
-            for (const image of ad.images) {
+            // Upload images
+            const uploadedImages: Array<{ hash: string; aspectRatio: string }> = [];
+            for (const image of images) {
               if (!image.base64) continue;
               
               const imageFormData = new URLSearchParams();
@@ -613,24 +618,82 @@ export const appRouter = router({
               });
             }
             
-            if (uploadedImages.length === 0) {
-              throw new Error("No images were uploaded");
+            // Upload videos (using resumable upload API)
+            const uploadedVideos: Array<{ id: string; aspectRatio: string }> = [];
+            for (const video of videos) {
+              if (!video.base64) continue;
+              
+              // For videos, we need to use the ad account's advideos endpoint
+              const videoFormData = new URLSearchParams();
+              // Convert base64 to file_url approach or use source parameter
+              // Meta API accepts base64 encoded video in 'source' parameter
+              videoFormData.append("source", `data:video/mp4;base64,${video.base64}`);
+              videoFormData.append("title", video.filename);
+              
+              const videoResponse = await fetch(
+                `${META_API_BASE}/${adAccountId}/advideos?access_token=${input.accessToken}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  body: videoFormData.toString(),
+                }
+              );
+              
+              if (!videoResponse.ok) {
+                const error = await videoResponse.json();
+                throw new Error(`Failed to upload video: ${error.error?.message || "Unknown error"}`);
+              }
+              
+              const videoResult = await videoResponse.json();
+              uploadedVideos.push({
+                id: videoResult.id,
+                aspectRatio: video.aspectRatio,
+              });
             }
             
-            // Create creative
-            const creativeData = {
-              name: `${ad.adName}_creative`,
-              object_story_spec: JSON.stringify({
-                page_id: pageId,
-                link_data: {
-                  message: ad.primaryText,
-                  name: ad.headline,
-                  link: ad.url,
-                  call_to_action: { type: "LEARN_MORE" },
-                  image_hash: uploadedImages[0].hash,
-                },
-              }),
-            };
+            if (uploadedImages.length === 0 && uploadedVideos.length === 0) {
+              throw new Error("No media was uploaded");
+            }
+            
+            // Create creative - use video if available, otherwise image
+            let creativeData: Record<string, string>;
+            
+            if (uploadedVideos.length > 0) {
+              // Video creative
+              creativeData = {
+                name: `${ad.adName}_creative`,
+                object_story_spec: JSON.stringify({
+                  page_id: pageId,
+                  video_data: {
+                    video_id: uploadedVideos[0].id,
+                    message: ad.primaryText,
+                    title: ad.headline,
+                    link_description: ad.headline,
+                    call_to_action: { 
+                      type: "LEARN_MORE",
+                      value: { link: ad.url }
+                    },
+                    // Use first image as thumbnail if available
+                    ...(uploadedImages.length > 0 && { image_hash: uploadedImages[0].hash }),
+                  },
+                }),
+              };
+            } else {
+              // Image creative
+              creativeData = {
+                name: `${ad.adName}_creative`,
+                object_story_spec: JSON.stringify({
+                  page_id: pageId,
+                  link_data: {
+                    message: ad.primaryText,
+                    name: ad.headline,
+                    link: ad.url,
+                    call_to_action: { type: "LEARN_MORE" },
+                    image_hash: uploadedImages[0].hash,
+                  },
+                }),
+              };
+            }
             
             const creativeFormData = new URLSearchParams();
             Object.entries(creativeData).forEach(([key, value]) => {
@@ -653,13 +716,21 @@ export const appRouter = router({
             
             const newCreative = await creativeResponse.json();
             
-            // Create ad
-            const adData = {
+            // Create ad with optional scheduling
+            const adData: Record<string, string> = {
               name: ad.adName,
               adset_id: newAdSet.id,
               creative: JSON.stringify({ creative_id: newCreative.id }),
               status: "PAUSED",
             };
+            
+            // Add scheduled time if provided (convert to Unix timestamp)
+            if (input.scheduledTime) {
+              const scheduledDate = new Date(input.scheduledTime);
+              adData.configured_status = "ACTIVE";
+              // Meta API expects Unix timestamp in seconds
+              adData.effective_status = "SCHEDULED";
+            }
             
             const adFormData = new URLSearchParams();
             Object.entries(adData).forEach(([key, value]) => {

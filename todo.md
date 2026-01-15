@@ -69,3 +69,22 @@
 - [x] Support video upload to Meta API (uses same base64 upload)
 - [x] Create multiple Ad Sets in one batch (each container creates its own Ad Set)
 - [x] Handle video creative creation (handled by Meta API automatically)
+
+## Improvements Round 2
+
+### Upload Flow Verification
+- [x] Verify image upload returns hash before creating creative
+- [x] Implement proper video upload to Meta API (videos need different endpoint)
+- [x] Video upload should return video_id for creative creation
+
+### UI Simplification
+- [x] Merge Upload Media zone with Pool into single component
+- [x] Remove separate Upload Media card - Pool IS the upload zone
+- [x] Drag & drop directly into Pool area
+
+### Schedule Ads Feature
+- [x] Add date/time picker for scheduling ads
+- [x] Hardcode timezone to Europe/Bucharest
+- [x] Pass scheduled_publish_time to Meta API when creating ads
+- [x] Show scheduled time in Create button
+- [x] Remove orange color from Pool icon - use consistent design

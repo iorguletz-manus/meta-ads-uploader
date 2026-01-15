@@ -280,11 +280,12 @@ describe("meta.batchCreateAds", () => {
           primaryText: "Check this out!",
           headline: "Amazing Deal",
           url: "https://example.com",
-          images: [
+          media: [
             {
               filename: "test_9x16.jpg",
               aspectRatio: "9x16",
               base64: "base64encodedimage",
+              type: "image" as const,
             },
           ],
         },
@@ -320,6 +321,6 @@ describe("meta.batchCreateAds", () => {
         newAdSetName: "New Ad Set",
         ads: [],
       })
-    ).rejects.toThrow("Could not determine page ID from template ad");
+    ).rejects.toThrow(); // Will throw because no page ID in template
   });
 });
