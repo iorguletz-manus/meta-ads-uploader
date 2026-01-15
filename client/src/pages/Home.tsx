@@ -1,4 +1,6 @@
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,6 +84,12 @@ interface Ad {
   id: string;
   name: string;
   status: string;
+}
+
+interface AdAccount {
+  id: string;
+  name: string;
+  account_status: number;
 }
 
 // Draggable Ad Group Component
@@ -326,6 +334,13 @@ export default function Home() {
   const [fbConnected, setFbConnected] = useState(false);
   const [fbAccessToken, setFbAccessToken] = useState<string | null>(null);
 
+  // Ad Account state
+  const [allAdAccounts, setAllAdAccounts] = useState<AdAccount[]>([]);
+  const [enabledAdAccounts, setEnabledAdAccounts] = useState<string[]>([]);
+  const [selectedAdAccount, setSelectedAdAccount] = useState("");
+  const [showAdAccountModal, setShowAdAccountModal] = useState(false);
+  const [isFirstConnect, setIsFirstConnect] = useState(false);
+
   // Selection state
   const [selectedCampaign, setSelectedCampaign] = useState("");
   const [selectedAdSet, setSelectedAdSet] = useState("");
@@ -376,9 +391,57 @@ export default function Home() {
   }, []);
 
   // API queries
-  const campaignsQuery = trpc.meta.getCampaigns.useQuery(
+  const adAccountsQuery = trpc.meta.getAdAccounts.useQuery(
     { accessToken: fbAccessToken || "" },
     { enabled: !!fbAccessToken && fbConnected }
+  );
+
+  // Load enabled accounts from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("enabledAdAccounts");
+    if (saved) {
+      try {
+        setEnabledAdAccounts(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse saved ad accounts", e);
+      }
+    }
+  }, []);
+
+  // When ad accounts load, check if first connect
+  useEffect(() => {
+    if (adAccountsQuery.data && adAccountsQuery.data.length > 0) {
+      setAllAdAccounts(adAccountsQuery.data as AdAccount[]);
+      const saved = localStorage.getItem("enabledAdAccounts");
+      if (!saved) {
+        setIsFirstConnect(true);
+        setShowAdAccountModal(true);
+      }
+    }
+  }, [adAccountsQuery.data]);
+
+  // Save enabled accounts to localStorage
+  const saveEnabledAccounts = (accounts: string[]) => {
+    setEnabledAdAccounts(accounts);
+    localStorage.setItem("enabledAdAccounts", JSON.stringify(accounts));
+    if (accounts.length > 0 && !selectedAdAccount) {
+      setSelectedAdAccount(accounts[0]);
+    }
+  };
+
+  // Toggle account in modal
+  const toggleAdAccount = (accountId: string) => {
+    setEnabledAdAccounts((prev) =>
+      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
+    );
+  };
+
+  // Get enabled ad accounts for dropdown
+  const enabledAdAccountsList = allAdAccounts.filter((acc) => enabledAdAccounts.includes(acc.id));
+
+  const campaignsQuery = trpc.meta.getCampaigns.useQuery(
+    { accessToken: fbAccessToken || "", adAccountId: selectedAdAccount },
+    { enabled: !!fbAccessToken && fbConnected && !!selectedAdAccount }
   );
 
   const adSetsQuery = trpc.meta.getAdSets.useQuery(
@@ -845,10 +908,20 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-3">
               {fbConnected ? (
-                <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 rounded-full text-sm">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Connected
-                </span>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAdAccountModal(true)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    Manage Ad Accounts
+                  </Button>
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 rounded-full text-sm">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Connected
+                  </span>
+                </>
               ) : (
                 <Button onClick={handleFacebookLogin} variant="outline" size="sm">
                   Connect Facebook
@@ -875,7 +948,29 @@ export default function Home() {
                 Select Template Ad
               </CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-3 gap-3">
+            <CardContent className="grid grid-cols-4 gap-3">
+              <Select
+                value={selectedAdAccount}
+                onValueChange={(v) => {
+                  setSelectedAdAccount(v);
+                  setSelectedCampaign("");
+                  setSelectedAdSet("");
+                  setSelectedAd("");
+                }}
+                disabled={!fbConnected || enabledAdAccountsList.length === 0}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Ad Account..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {enabledAdAccountsList.map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.name || acc.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               <Select
                 value={selectedCampaign}
                 onValueChange={(v) => {
@@ -883,7 +978,7 @@ export default function Home() {
                   setSelectedAdSet("");
                   setSelectedAd("");
                 }}
-                disabled={!fbConnected}
+                disabled={!fbConnected || !selectedAdAccount}
               >
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="Campaign..." />
@@ -1134,6 +1229,54 @@ export default function Home() {
           )}
         </main>
       </div>
+
+      {/* Ad Account Management Modal */}
+      <Dialog open={showAdAccountModal} onOpenChange={setShowAdAccountModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manage Ad Accounts</DialogTitle>
+            <DialogDescription>
+              {isFirstConnect
+                ? "Select which Ad Accounts you want to use in this app."
+                : "Enable or disable Ad Accounts for the dropdown."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[300px] overflow-y-auto space-y-2 py-4">
+            {allAdAccounts.map((acc) => (
+              <div
+                key={acc.id}
+                className="flex items-center space-x-3 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
+                onClick={() => toggleAdAccount(acc.id)}
+              >
+                <Checkbox
+                  checked={enabledAdAccounts.includes(acc.id)}
+                  onCheckedChange={() => toggleAdAccount(acc.id)}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{acc.name || "Unnamed Account"}</p>
+                  <p className="text-xs text-muted-foreground">{acc.id}</p>
+                </div>
+              </div>
+            ))}
+            {allAdAccounts.length === 0 && (
+              <p className="text-center text-muted-foreground py-4">No Ad Accounts found</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                saveEnabledAccounts(enabledAdAccounts);
+                setShowAdAccountModal(false);
+                setIsFirstConnect(false);
+                toast.success(`${enabledAdAccounts.length} Ad Account(s) enabled`);
+              }}
+              disabled={enabledAdAccounts.length === 0}
+            >
+              Save ({enabledAdAccounts.length} selected)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Drag Overlay */}
       <DragOverlay>
