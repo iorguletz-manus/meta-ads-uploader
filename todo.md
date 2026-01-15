@@ -342,3 +342,13 @@
 - [x] Fix: Lățime fixă 960px - redenumit clasa din .container în .app-container pentru a evita conflictul cu Tailwind CSS 4
 - [x] Fix: Scroll automat la item selectat - adăugat refs și useEffect pentru campaigns, adSets, ads
 - [ ] Fix: Warning Missing Description for DialogContent
+
+
+## Bug Fix - Round 16
+
+### UI Changes
+- [x] Iconița Google Drive - mică în stânga sus, cu culorile oficiale (galben, albastru, verde, roșu)
+- [x] Zona de drag & drop - full width (fără butonul Google Drive separat)
+
+### Meta API Fix
+- [ ] Fix eroare "Invalid parameter" - log-urile arată că base64 se convertește corect dar eroarea persistă

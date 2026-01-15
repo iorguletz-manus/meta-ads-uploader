@@ -1351,46 +1351,64 @@ export default function Home() {
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <div className="flex gap-3">
-              {/* Upload Zone */}
-              <div
-                className="flex-1 border-2 border-dashed rounded-lg p-4 min-h-[150px] transition-colors hover:border-primary/50 cursor-pointer"
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.classList.add("border-primary", "bg-primary/5");
+            {/* Upload Zone - Full Width */}
+            <div
+              className="relative border-2 border-dashed rounded-lg p-4 min-h-[150px] transition-colors hover:border-primary/50 cursor-pointer"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.classList.add("border-primary", "bg-primary/5");
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.classList.remove("border-primary", "bg-primary/5");
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.classList.remove("border-primary", "bg-primary/5");
+                if (e.dataTransfer.files.length > 0) {
+                  handleFileUpload(e.dataTransfer.files);
+                }
+              }}
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.multiple = true;
+                input.accept = "image/*,video/*";
+                input.onchange = (e) => {
+                  const files = (e.target as HTMLInputElement).files;
+                  if (files) handleFileUpload(files);
+                };
+                input.click();
+              }}
+            >
+              {/* Google Drive Icon - Top Left */}
+              <button
+                className="absolute top-2 left-2 p-1.5 rounded-md hover:bg-muted/50 transition-colors z-10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleGoogleDriveConnect();
                 }}
-                onDragLeave={(e) => {
-                  e.currentTarget.classList.remove("border-primary", "bg-primary/5");
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.classList.remove("border-primary", "bg-primary/5");
-                  if (e.dataTransfer.files.length > 0) {
-                    handleFileUpload(e.dataTransfer.files);
-                  }
-                }}
-                onClick={() => {
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.multiple = true;
-                  input.accept = "image/*,video/*";
-                  input.onchange = (e) => {
-                    const files = (e.target as HTMLInputElement).files;
-                    if (files) handleFileUpload(files);
-                  };
-                  input.click();
-                }}
+                title="Import from Google Drive"
               >
-                {mediaPool.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <div className="flex gap-2 mb-2">
-                      <ImagePlus className="h-8 w-8" />
-                      <Film className="h-8 w-8" />
-                    </div>
-                    <p className="font-medium text-sm">Drop images & videos here</p>
-                    <p className="text-xs mt-1">or click to browse</p>
+                <svg className="h-5 w-5" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066da"/>
+                  <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 47.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27z" fill="#00ac47"/>
+                  <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85L73.55 76.8z" fill="#ea4335"/>
+                  <path d="M43.65 25l13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832d"/>
+                  <path d="M59.85 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.5c1.6 0 3.15-.45 4.5-1.2L59.85 53z" fill="#2684fc"/>
+                  <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 28h27.45c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#ffba00"/>
+                </svg>
+              </button>
+              
+              {mediaPool.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                  <div className="flex gap-2 mb-2">
+                    <ImagePlus className="h-8 w-8" />
+                    <Film className="h-8 w-8" />
                   </div>
-                ) : (
+                  <p className="font-medium text-sm">Drop images & videos here</p>
+                  <p className="text-xs mt-1">or click to browse</p>
+                </div>
+              ) : (
                   <div className="space-y-2">
                     {/* Grouped media display */}
                     {(() => {
@@ -1434,25 +1452,6 @@ export default function Home() {
                     })()}
                   </div>
                 )}
-              </div>
-
-              {/* Google Drive Button */}
-              <div className="w-32 flex flex-col gap-1.5">
-                <Button
-                  variant="outline"
-                  className="h-auto py-3 flex-col gap-1.5 text-xs"
-                  onClick={handleGoogleDriveConnect}
-                >
-                  <FolderOpen className="h-5 w-5" />
-                  <span>Google Drive</span>
-                </Button>
-                {gdriveConnected && (
-                  <span className="text-[10px] text-green-600 text-center flex items-center justify-center gap-0.5">
-                    <CheckCircle2 className="h-2.5 w-2.5" />
-                    Connected
-                  </span>
-                )}
-              </div>
             </div>
           </CardContent>
         </Card>

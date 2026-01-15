@@ -930,7 +930,12 @@ export const appRouter = router({
               creativeFormData.append(key, value);
             });
             
-            console.log("Creating creative with data:", JSON.stringify(creativeData, null, 2));
+            console.log("=" .repeat(80));
+            console.log("[CREATIVE] Creating creative with data:");
+            console.log("[CREATIVE] name:", creativeData.name);
+            console.log("[CREATIVE] object_story_spec:", creativeData.object_story_spec);
+            console.log("[CREATIVE] Parsed object_story_spec:", JSON.stringify(JSON.parse(creativeData.object_story_spec), null, 2));
+            console.log("=" .repeat(80));
             
             const creativeResponse = await fetch(
               `${META_API_BASE}/${adAccountId}/adcreatives?access_token=${input.accessToken}`,
@@ -942,9 +947,20 @@ export const appRouter = router({
             );
             
             if (!creativeResponse.ok) {
-              const error = await creativeResponse.json();
-              console.error("Creative creation error:", JSON.stringify(error, null, 2));
-              console.error("Creative data sent:", JSON.stringify(creativeData, null, 2));
+              const errorText = await creativeResponse.text();
+              console.error("=" .repeat(80));
+              console.error("[CREATIVE ERROR] Response status:", creativeResponse.status);
+              console.error("[CREATIVE ERROR] Response text:", errorText);
+              console.error("[CREATIVE ERROR] Creative data sent:");
+              console.error("[CREATIVE ERROR]   name:", creativeData.name);
+              console.error("[CREATIVE ERROR]   object_story_spec:", creativeData.object_story_spec);
+              console.error("=" .repeat(80));
+              let error;
+              try {
+                error = JSON.parse(errorText);
+              } catch {
+                error = { error: { message: errorText } };
+              }
               throw new Error(`Failed to create creative: ${error.error?.message || JSON.stringify(error)}`);
             }
             
