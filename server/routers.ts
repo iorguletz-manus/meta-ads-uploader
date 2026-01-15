@@ -1,6 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
-import { saveFacebookToken, getFacebookToken, clearFacebookToken } from "./db";
+import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -100,6 +100,25 @@ export const appRouter = router({
         if (!ctx.user) throw new Error("Not authenticated");
         await clearFacebookToken(ctx.user.openId);
         return { success: true };
+      }),
+
+    // Save ad account settings
+    saveAdAccountSettings: protectedProcedure
+      .input(z.object({ 
+        selectedAdAccountId: z.string().nullable(), 
+        enabledAdAccountIds: z.array(z.string()) 
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) throw new Error("Not authenticated");
+        await saveAdAccountSettings(ctx.user.openId, input.selectedAdAccountId, input.enabledAdAccountIds);
+        return { success: true };
+      }),
+
+    // Get ad account settings
+    getAdAccountSettings: protectedProcedure
+      .query(async ({ ctx }) => {
+        if (!ctx.user) return null;
+        return await getAdAccountSettings(ctx.user.openId);
       }),
 
     // Get ad accounts for the user

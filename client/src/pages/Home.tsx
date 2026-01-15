@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   Play,
+  AlignLeft,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -100,6 +101,38 @@ interface AdAccount {
 // Facebook mobile text width (approximately 320px for primary text area)
 const FB_TEXT_WIDTH = "320px";
 
+// Helper to get tomorrow's date in YYYY-MM-DD format
+const getTomorrowDate = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.toISOString().split('T')[0];
+};
+
+// Helper to arrange text: one sentence per line with blank lines between
+const arrangeText = (text: string): string => {
+  // Split by sentence endings (. ! ?) followed by space or end
+  const sentences = text
+    .replace(/([.!?])\s+/g, '$1\n\n')
+    .split('\n\n')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+  
+  return sentences.join('\n\n');
+};
+
+// Helper to combine hook and body with proper spacing
+const combineHookAndBody = (hook: string, body: string): string => {
+  const trimmedHook = hook.trim();
+  const trimmedBody = body.trim();
+  
+  if (!trimmedHook && !trimmedBody) return '';
+  if (!trimmedHook) return trimmedBody;
+  if (!trimmedBody) return trimmedHook;
+  
+  // Always add a blank line between hook and body
+  return `${trimmedHook}\n\n${trimmedBody}`;
+};
+
 export default function Home() {
   // Auth state
   const { data: user, isLoading: authLoading } = trpc.auth.me.useQuery();
@@ -149,10 +182,10 @@ export default function Home() {
   // Ad Sets for preview (Step 4)
   const [adSetsPreview, setAdSetsPreview] = useState<AdSetData[]>([]);
 
-  // Global schedule settings
+  // Global schedule settings - pre-filled with tomorrow 00:05
   const [globalScheduleEnabled, setGlobalScheduleEnabled] = useState(false);
-  const [globalScheduleDate, setGlobalScheduleDate] = useState("");
-  const [globalScheduleTime, setGlobalScheduleTime] = useState("");
+  const [globalScheduleDate, setGlobalScheduleDate] = useState(getTomorrowDate());
+  const [globalScheduleTime, setGlobalScheduleTime] = useState("00:05");
 
   // Creating state
   const [isCreating, setIsCreating] = useState(false);
@@ -162,8 +195,16 @@ export default function Home() {
     enabled: !!user && !fbConnected,
   });
 
+  // Query for saved ad account settings
+  const adAccountSettingsQuery = trpc.meta.getAdAccountSettings.useQuery(undefined, {
+    enabled: !!user,
+  });
+
   // Mutation to save Facebook token
   const saveTokenMutation = trpc.meta.saveFacebookToken.useMutation();
+
+  // Mutation to save ad account settings
+  const saveAdAccountSettingsMutation = trpc.meta.saveAdAccountSettings.useMutation();
 
   // Auto-connect if we have a saved token
   useEffect(() => {
@@ -173,6 +214,18 @@ export default function Home() {
       toast.success("Facebook auto-connected!");
     }
   }, [savedTokenQuery.data, fbConnected]);
+
+  // Load ad account settings from database
+  useEffect(() => {
+    if (adAccountSettingsQuery.data) {
+      if (adAccountSettingsQuery.data.enabledAdAccountIds.length > 0) {
+        setEnabledAdAccounts(adAccountSettingsQuery.data.enabledAdAccountIds);
+      }
+      if (adAccountSettingsQuery.data.selectedAdAccountId) {
+        setSelectedAdAccount(adAccountSettingsQuery.data.selectedAdAccountId);
+      }
+    }
+  }, [adAccountSettingsQuery.data]);
 
   // Check for FB token in URL (OAuth callback)
   useEffect(() => {
@@ -198,36 +251,29 @@ export default function Home() {
     { enabled: !!fbAccessToken && fbConnected }
   );
 
-  // Load enabled accounts from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("enabledAdAccounts");
-    if (saved) {
-      try {
-        setEnabledAdAccounts(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse saved ad accounts", e);
-      }
-    }
-  }, []);
-
   // When ad accounts load
   useEffect(() => {
     if (adAccountsQuery.data && adAccountsQuery.data.length > 0) {
       setAllAdAccounts(adAccountsQuery.data as AdAccount[]);
-      const saved = localStorage.getItem("enabledAdAccounts");
-      if (!saved) {
+      // Only show modal if no saved settings
+      if (!adAccountSettingsQuery.data?.enabledAdAccountIds?.length) {
         setIsFirstConnect(true);
         setShowAdAccountModal(true);
       }
     }
-  }, [adAccountsQuery.data]);
+  }, [adAccountsQuery.data, adAccountSettingsQuery.data]);
 
-  const saveEnabledAccounts = (accounts: string[]) => {
+  const saveEnabledAccounts = (accounts: string[], selected?: string) => {
     setEnabledAdAccounts(accounts);
-    localStorage.setItem("enabledAdAccounts", JSON.stringify(accounts));
-    if (accounts.length > 0 && !selectedAdAccount) {
-      setSelectedAdAccount(accounts[0]);
+    const selectedId = selected || (accounts.length > 0 ? accounts[0] : null);
+    if (selectedId) {
+      setSelectedAdAccount(selectedId);
     }
+    // Save to database
+    saveAdAccountSettingsMutation.mutate({
+      selectedAdAccountId: selectedId,
+      enabledAdAccountIds: accounts,
+    });
   };
 
   const toggleAdAccount = (accountId: string) => {
@@ -358,7 +404,7 @@ export default function Home() {
         const [prefix, media] = groupsArray[groupIndex];
         ads.push({
           id: `ad-${Date.now()}-${groupIndex}`,
-          adName: prefix.toUpperCase(), // Always uppercase
+          adName: prefix.toUpperCase(),
           hook: "",
           primaryText: "",
           media,
@@ -379,8 +425,8 @@ export default function Home() {
           isExpanded: true,
           mediaType,
           scheduleEnabled: false,
-          scheduleDate: "",
-          scheduleTime: "",
+          scheduleDate: getTomorrowDate(),
+          scheduleTime: "00:05",
         });
       }
     }
@@ -420,6 +466,16 @@ export default function Home() {
   // Remove ad set
   const removeAdSet = (adSetId: string) => {
     setAdSetsPreview((prev) => prev.filter((as) => as.id !== adSetId));
+  };
+
+  // Arrange text for a specific ad set's body
+  const handleArrangeText = (adSetId: string) => {
+    setAdSetsPreview((prev) =>
+      prev.map((as) =>
+        as.id === adSetId ? { ...as, sharedBody: arrangeText(as.sharedBody) } : as
+      )
+    );
+    toast.success("Text arranged!");
   };
 
   // Apply global schedule to all ad sets
@@ -469,7 +525,8 @@ export default function Home() {
         const adsToCreate = adSet.ads.map((ad) => {
           let primaryText = "";
           if (adSet.mediaType === "image" || adSet.mediaType === "mixed") {
-            primaryText = ad.hook ? `${ad.hook}\n\n${adSet.sharedBody}` : adSet.sharedBody;
+            // Use combineHookAndBody for proper spacing
+            primaryText = combineHookAndBody(ad.hook, adSet.sharedBody);
           } else {
             primaryText = ad.primaryText;
           }
@@ -552,7 +609,7 @@ export default function Home() {
       const adsToCreate = adSet.ads.map((ad) => {
         let primaryText = "";
         if (adSet.mediaType === "image" || adSet.mediaType === "mixed") {
-          primaryText = ad.hook ? `${ad.hook}\n\n${adSet.sharedBody}` : adSet.sharedBody;
+          primaryText = combineHookAndBody(ad.hook, adSet.sharedBody);
         } else {
           primaryText = ad.primaryText;
         }
@@ -762,7 +819,11 @@ export default function Home() {
                               setSelectedAd("");
                             }}
                             className={`w-full text-left px-2 py-1 rounded text-xs transition-colors truncate ${
-                              selectedCampaign === c.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                              selectedCampaign === c.id 
+                                ? "bg-primary text-primary-foreground" 
+                                : c.status === "PAUSED" 
+                                  ? "text-red-600 hover:bg-red-50" 
+                                  : "hover:bg-muted"
                             }`}
                           >
                             {c.name}
@@ -816,7 +877,11 @@ export default function Home() {
                               setSelectedAd("");
                             }}
                             className={`w-full text-left px-2 py-1 rounded text-xs transition-colors truncate ${
-                              selectedAdSet === a.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                              selectedAdSet === a.id 
+                                ? "bg-primary text-primary-foreground" 
+                                : a.status === "PAUSED" 
+                                  ? "text-red-600 hover:bg-red-50" 
+                                  : "hover:bg-muted"
                             }`}
                           >
                             {a.name}
@@ -867,7 +932,11 @@ export default function Home() {
                             key={a.id}
                             onClick={() => setSelectedAd(a.id)}
                             className={`w-full text-left px-1.5 py-1 rounded text-xs transition-colors flex items-center gap-1.5 ${
-                              selectedAd === a.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                              selectedAd === a.id 
+                                ? "bg-primary text-primary-foreground" 
+                                : a.status === "PAUSED" 
+                                  ? "text-red-600 hover:bg-red-50" 
+                                  : "hover:bg-muted"
                             }`}
                           >
                             <div className="w-6 h-6 rounded overflow-hidden bg-muted flex-shrink-0">
@@ -1242,12 +1311,21 @@ export default function Home() {
                           {/* Shared Body for image ads */}
                           {adSet.mediaType !== "video" && (
                             <div>
-                              <Label className="text-[10px] text-muted-foreground">Body (shared)</Label>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-[10px] text-muted-foreground">Body (shared)</Label>
+                                <button
+                                  onClick={() => handleArrangeText(adSet.id)}
+                                  className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-0.5"
+                                >
+                                  <AlignLeft className="h-2.5 w-2.5" />
+                                  Arrange text
+                                </button>
+                              </div>
                               <Textarea
                                 value={adSet.sharedBody}
                                 onChange={(e) => updateAdSet(adSet.id, "sharedBody", e.target.value)}
                                 className="text-xs resize-y"
-                                style={{ minHeight: "200px", width: "100%" }}
+                                style={{ minHeight: "400px", width: "100%" }}
                                 placeholder="Shared body text..."
                               />
                             </div>
@@ -1406,10 +1484,10 @@ export default function Home() {
             <Button
               size="sm"
               onClick={() => {
-                saveEnabledAccounts(enabledAdAccounts);
+                saveEnabledAccounts(enabledAdAccounts, selectedAdAccount);
                 setShowAdAccountModal(false);
                 setIsFirstConnect(false);
-                toast.success(`${enabledAdAccounts.length} Ad Account(s) enabled`);
+                toast.success(`${enabledAdAccounts.length} Ad Account(s) saved`);
               }}
               disabled={enabledAdAccounts.length === 0}
             >

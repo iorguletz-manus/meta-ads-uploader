@@ -164,3 +164,68 @@ export async function clearFacebookToken(openId: string): Promise<void> {
     throw error;
   }
 }
+
+
+// Ad Account settings management
+export async function saveAdAccountSettings(
+  openId: string, 
+  selectedAdAccountId: string | null, 
+  enabledAdAccountIds: string[]
+): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot save ad account settings: database not available");
+    return;
+  }
+
+  try {
+    await db.update(users)
+      .set({
+        selectedAdAccountId: selectedAdAccountId,
+        enabledAdAccountIds: JSON.stringify(enabledAdAccountIds),
+      })
+      .where(eq(users.openId, openId));
+  } catch (error) {
+    console.error("[Database] Failed to save ad account settings:", error);
+    throw error;
+  }
+}
+
+export async function getAdAccountSettings(openId: string): Promise<{
+  selectedAdAccountId: string | null;
+  enabledAdAccountIds: string[];
+} | null> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get ad account settings: database not available");
+    return null;
+  }
+
+  try {
+    const result = await db.select({
+      selectedAdAccountId: users.selectedAdAccountId,
+      enabledAdAccountIds: users.enabledAdAccountIds,
+    }).from(users).where(eq(users.openId, openId)).limit(1);
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    let enabledIds: string[] = [];
+    if (result[0].enabledAdAccountIds) {
+      try {
+        enabledIds = JSON.parse(result[0].enabledAdAccountIds);
+      } catch {
+        enabledIds = [];
+      }
+    }
+
+    return {
+      selectedAdAccountId: result[0].selectedAdAccountId,
+      enabledAdAccountIds: enabledIds,
+    };
+  } catch (error) {
+    console.error("[Database] Failed to get ad account settings:", error);
+    return null;
+  }
+}

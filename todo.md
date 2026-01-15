@@ -184,3 +184,22 @@
 
 ### Bug Fixes
 - [ ] Fix: "Invalid parameter" la creare Ad Set
+
+
+## UI Improvements - Round 4
+
+### Visual Improvements
+- [x] PAUSED campaigns/adsets/ads afișate cu roșu pentru diferențiere
+- [x] Body textarea dublu ca înălțime (400px în loc de 200px)
+
+### Schedule Improvements
+- [x] Schedule All precompletare automată cu 00:05 ziua următoare
+
+### Text Formatting
+- [x] Link "Arrange text" sub Body textarea
+- [x] Funcție arrange text: 1 propoziție per linie cu spații între ele
+- [x] Spațiu automat între Hook și Body când se unesc (linie goală)
+
+### Bug Fixes
+- [x] Fix: Facebook connection nu rămâne conectat la refresh (era deja implementat)
+- [x] Fix: Ad Account selectat persistă acum în baza de date la nivel de user

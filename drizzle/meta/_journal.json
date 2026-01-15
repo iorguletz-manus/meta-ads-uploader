@@ -15,6 +15,13 @@
       "when": 1768479360474,
       "tag": "0001_heavy_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1768485764981,
+      "tag": "0002_left_serpent_society",
+      "breakpoints": true
     }
   ]
 }

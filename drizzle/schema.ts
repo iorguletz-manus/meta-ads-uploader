@@ -24,6 +24,10 @@ export const users = mysqlTable("users", {
   facebookAccessToken: text("facebookAccessToken"),
   /** Facebook token expiry timestamp */
   facebookTokenExpiry: timestamp("facebookTokenExpiry"),
+  /** Selected Ad Account ID */
+  selectedAdAccountId: varchar("selectedAdAccountId", { length: 64 }),
+  /** Enabled Ad Account IDs (JSON array) */
+  enabledAdAccountIds: text("enabledAdAccountIds"),
 });
 
 export type User = typeof users.$inferSelect;

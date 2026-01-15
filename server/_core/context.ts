@@ -25,6 +25,8 @@ const FIXED_USER: User = {
   lastSignedIn: new Date(),
   facebookAccessToken: null,
   facebookTokenExpiry: null,
+  selectedAdAccountId: null,
+  enabledAdAccountIds: null,
 };
 
 async function verifySimpleSession(cookieValue: string | undefined): Promise<boolean> {
