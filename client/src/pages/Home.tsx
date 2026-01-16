@@ -26,6 +26,7 @@ import {
   EyeOff,
   Play,
   AlignLeft,
+  Info,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -338,6 +339,10 @@ export default function Home() {
   const [adSetSearch, setAdSetSearch] = useState(() => getLS(LS_KEYS.ADSET_SEARCH, ""));
   const [adSearch, setAdSearch] = useState(() => getLS(LS_KEYS.AD_SEARCH, ""));
 
+  // Debug: Show all ad settings dialog
+  const [showAllSettingsDialog, setShowAllSettingsDialog] = useState(false);
+  const [allSettingsData, setAllSettingsData] = useState<string>("");
+
   // Show inactive toggles - initialize from localStorage
   const [showInactiveCampaigns, setShowInactiveCampaigns] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_CAMPAIGNS, false));
   const [showInactiveAdSets, setShowInactiveAdSets] = useState(() => getLS(LS_KEYS.SHOW_INACTIVE_ADSETS, false));
@@ -609,6 +614,26 @@ export default function Home() {
 
   // Mutations
   const batchCreateAdsMutation = trpc.meta.batchCreateAds.useMutation();
+
+  // Debug: Get all ad fields
+  const handleShowAllSettings = async () => {
+    if (!fbAccessToken || !selectedAd) {
+      toast.error("Select an ad first");
+      return;
+    }
+    try {
+      const result = await fetch(`/api/trpc/meta.getAdAllFields?input=${encodeURIComponent(JSON.stringify({ accessToken: fbAccessToken, adId: selectedAd }))}`);
+      const data = await result.json();
+      if (data.result?.data?.formatted) {
+        setAllSettingsData(data.result.data.formatted);
+        setShowAllSettingsDialog(true);
+      } else {
+        toast.error("Failed to get ad settings");
+      }
+    } catch (err) {
+      toast.error("Error fetching ad settings");
+    }
+  };
 
   // Facebook Login
   const handleFacebookLogin = () => {
@@ -2192,11 +2217,22 @@ export default function Home() {
         {/* Step 1: Select Template Ad */}
         <Card>
           <CardHeader className="py-1 px-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
-                1
-              </span>
-              Select Template Ad
+            <CardTitle className="text-sm flex items-center gap-2 justify-between w-full">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
+                  1
+                </span>
+                Select Template Ad
+              </div>
+              {selectedAd && (
+                <button
+                  onClick={handleShowAllSettings}
+                  className="text-xs text-blue-500 hover:text-blue-700 hover:underline flex items-center gap-1"
+                >
+                  <Info className="h-3 w-3" />
+                  Show All Settings
+                </button>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="px-3 pb-2">
@@ -3224,6 +3260,33 @@ export default function Home() {
             >
               {isCreating ? 'Please wait...' : 'Close'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Debug: All Settings Dialog */}
+      <Dialog open={showAllSettingsDialog} onOpenChange={setShowAllSettingsDialog}>
+        <DialogContent className="max-w-4xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>All Ad Settings (Raw Meta API Response)</DialogTitle>
+            <DialogDescription>
+              Complete data from Meta API for the selected ad. Copy this to analyze the structure.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="h-[60vh] w-full rounded-md border p-4">
+            <pre className="text-xs font-mono whitespace-pre-wrap break-all">{allSettingsData}</pre>
+          </ScrollArea>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(allSettingsData);
+                toast.success("Copied to clipboard!");
+              }}
+            >
+              Copy to Clipboard
+            </Button>
+            <Button onClick={() => setShowAllSettingsDialog(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -867,6 +867,24 @@ export const appRouter = router({
         };
       }),
 
+    // Debug: Get ALL ad fields from Meta API
+    getAdAllFields: protectedProcedure
+      .input(z.object({ accessToken: z.string(), adId: z.string() }))
+      .query(async ({ input }) => {
+        // Get ad with ALL creative fields
+        const ad = await metaApiRequest(
+          `/${input.adId}?fields=id,name,status,effective_status,created_time,updated_time,creative{id,name,title,body,object_story_spec,asset_feed_spec,degrees_of_freedom_spec,contextual_multi_ads,call_to_action_type,image_url,thumbnail_url,video_id,object_type,object_url,instagram_permalink_url,effective_instagram_media_id,effective_instagram_story_id,effective_object_story_id,link_url,template_url,applink_treatment,authorization_category,branded_content_sponsor_page_id,bundle_folder_id,categorization_criteria,category_media_source,collaborative_ads_lsb_image_bank_id,destination_set_id,dynamic_ad_voice,enable_direct_install,enable_launch_instant_app,image_crops,image_hash,interactive_components_spec,is_dco_internal,link_destination_display_url,link_og_id,messenger_sponsored_message,object_id,place_page_set_id,platform_customizations,playable_asset_id,portrait_customizations,product_set_id,recommender_settings,source_instagram_media_id,use_page_actor_override}`,
+          input.accessToken
+        );
+        
+        console.log("[getAdAllFields] Full response:", JSON.stringify(ad, null, 2));
+        
+        return {
+          raw: ad,
+          formatted: JSON.stringify(ad, null, 2),
+        };
+      }),
+
     // Duplicate ad set - returns the new ad set ID
     duplicateAdSet: protectedProcedure
       .input(z.object({

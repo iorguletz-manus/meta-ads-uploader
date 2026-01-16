@@ -626,3 +626,15 @@
 
 ### Template Copy
 - [x] Fix headline not copying from template ad - now uses adDetailsQuery.data.headline
+
+
+## Feature - Round 24: Copy degrees_of_freedom_spec from Template
+
+### Goal
+- [ ] Copy degrees_of_freedom_spec from template ad and apply to new ads
+- [ ] This should preserve Advantage+ creative enhancements settings from template
+
+### Implementation
+- [ ] Add degreesOfFreedomSpec to batchCreateAds input schema
+- [ ] Pass degreesOfFreedomSpec from frontend when creating ads
+- [ ] Apply degreesOfFreedomSpec when creating creative
