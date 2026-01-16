@@ -195,12 +195,215 @@ export const appRouter = router({
         return { cdnUrl: result.cdnUrl, path: result.path };
       }),
 
-    // Delete media from Bunny.net CDN
+    // Delete media from Bunny.net CDN (BACKUP - kept for future use)
     deleteFromBunny: protectedProcedure
       .input(z.object({ filePath: z.string() }))
       .mutation(async ({ input }) => {
         const success = await deleteFromBunny(input.filePath);
         return { success };
+      }),
+
+    // Upload image directly to Meta API (returns image hash)
+    uploadImageToMeta: protectedProcedure
+      .input(z.object({
+        accessToken: z.string(),
+        adAccountId: z.string(),
+        base64Data: z.string(),
+        fileName: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        console.log("[uploadImageToMeta] Starting upload for:", input.fileName);
+        
+        try {
+          // Create form data for image upload
+          const formData = new FormData();
+          
+          // Convert base64 to buffer
+          const base64Clean = input.base64Data.replace(/^data:image\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Clean, "base64");
+          const blob = new Blob([buffer], { type: "image/jpeg" });
+          
+          formData.append("filename", input.fileName);
+          formData.append("source", blob, input.fileName);
+          formData.append("access_token", input.accessToken);
+          
+          const response = await fetch(
+            `${META_API_BASE}/${input.adAccountId}/adimages`,
+            {
+              method: "POST",
+              body: formData,
+            }
+          );
+          
+          const data = await response.json();
+          
+          if (data.error) {
+            console.error("[uploadImageToMeta] Error:", data.error);
+            throw new Error(data.error.message || "Failed to upload image to Meta");
+          }
+          
+          // Extract hash from response
+          const images = data.images || {};
+          const imageKey = Object.keys(images)[0];
+          const imageHash = images[imageKey]?.hash;
+          
+          if (!imageHash) {
+            throw new Error("No image hash returned from Meta");
+          }
+          
+          console.log("[uploadImageToMeta] Success! Hash:", imageHash);
+          return { 
+            success: true, 
+            hash: imageHash,
+            fileName: input.fileName 
+          };
+        } catch (error: any) {
+          console.error("[uploadImageToMeta] Failed:", error.message);
+          throw new Error(error.message || "Failed to upload image to Meta");
+        }
+      }),
+
+    // Upload video directly to Meta API (returns video ID)
+    uploadVideoToMeta: protectedProcedure
+      .input(z.object({
+        accessToken: z.string(),
+        adAccountId: z.string(),
+        base64Data: z.string(),
+        fileName: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        console.log("[uploadVideoToMeta] Starting upload for:", input.fileName);
+        
+        try {
+          // Convert base64 to buffer
+          const base64Clean = input.base64Data.replace(/^data:video\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Clean, "base64");
+          const blob = new Blob([buffer], { type: "video/mp4" });
+          
+          // Create form data for video upload
+          const formData = new FormData();
+          formData.append("title", input.fileName);
+          formData.append("source", blob, input.fileName);
+          formData.append("access_token", input.accessToken);
+          
+          const response = await fetch(
+            `${META_API_BASE}/${input.adAccountId}/advideos`,
+            {
+              method: "POST",
+              body: formData,
+            }
+          );
+          
+          const data = await response.json();
+          
+          if (data.error) {
+            console.error("[uploadVideoToMeta] Error:", data.error);
+            throw new Error(data.error.message || "Failed to upload video to Meta");
+          }
+          
+          if (!data.id) {
+            throw new Error("No video ID returned from Meta");
+          }
+          
+          console.log("[uploadVideoToMeta] Success! Video ID:", data.id);
+          return { 
+            success: true, 
+            videoId: data.id,
+            fileName: input.fileName 
+          };
+        } catch (error: any) {
+          console.error("[uploadVideoToMeta] Failed:", error.message);
+          throw new Error(error.message || "Failed to upload video to Meta");
+        }
+      }),
+
+    // Upload from Google Drive URL directly to Meta (server-side)
+    uploadFromGoogleDriveToMeta: protectedProcedure
+      .input(z.object({
+        accessToken: z.string(),
+        adAccountId: z.string(),
+        googleAccessToken: z.string(),
+        fileId: z.string(),
+        fileName: z.string(),
+        mimeType: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        console.log("[uploadFromGoogleDrive] Starting for:", input.fileName);
+        
+        try {
+          // Download file from Google Drive
+          const driveResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${input.fileId}?alt=media`,
+            {
+              headers: {
+                Authorization: `Bearer ${input.googleAccessToken}`,
+              },
+            }
+          );
+          
+          if (!driveResponse.ok) {
+            throw new Error("Failed to download from Google Drive");
+          }
+          
+          const fileBuffer = await driveResponse.arrayBuffer();
+          const blob = new Blob([fileBuffer], { type: input.mimeType });
+          
+          console.log("[uploadFromGoogleDrive] Downloaded from Drive, size:", fileBuffer.byteLength);
+          
+          // Determine if image or video
+          const isVideo = input.mimeType.startsWith("video/");
+          const endpoint = isVideo 
+            ? `${META_API_BASE}/${input.adAccountId}/advideos`
+            : `${META_API_BASE}/${input.adAccountId}/adimages`;
+          
+          // Create form data
+          const formData = new FormData();
+          if (isVideo) {
+            formData.append("title", input.fileName);
+          } else {
+            formData.append("filename", input.fileName);
+          }
+          formData.append("source", blob, input.fileName);
+          formData.append("access_token", input.accessToken);
+          
+          // Upload to Meta
+          const metaResponse = await fetch(endpoint, {
+            method: "POST",
+            body: formData,
+          });
+          
+          const data = await metaResponse.json();
+          
+          if (data.error) {
+            console.error("[uploadFromGoogleDrive] Meta error:", data.error);
+            throw new Error(data.error.message || "Failed to upload to Meta");
+          }
+          
+          if (isVideo) {
+            console.log("[uploadFromGoogleDrive] Video uploaded! ID:", data.id);
+            return { 
+              success: true, 
+              videoId: data.id,
+              fileName: input.fileName,
+              type: "video" as const
+            };
+          } else {
+            const images = data.images || {};
+            const imageKey = Object.keys(images)[0];
+            const imageHash = images[imageKey]?.hash;
+            
+            console.log("[uploadFromGoogleDrive] Image uploaded! Hash:", imageHash);
+            return { 
+              success: true, 
+              hash: imageHash,
+              fileName: input.fileName,
+              type: "image" as const
+            };
+          }
+        } catch (error: any) {
+          console.error("[uploadFromGoogleDrive] Failed:", error.message);
+          throw new Error(error.message || "Failed to upload from Google Drive to Meta");
+        }
       }),
 
     // Get ad accounts for the user

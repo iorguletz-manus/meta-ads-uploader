@@ -95,8 +95,15 @@ interface MediaFile {
   aspectRatio: string;
   base64: string;
   type: "image" | "video";
-  cdnUrl?: string; // Bunny.net CDN URL
+  cdnUrl?: string; // Bunny.net CDN URL (backup)
   bunnyPath?: string; // Path on Bunny storage for deletion
+  thumbnail?: string; // Video thumbnail (first frame)
+  metaHash?: string; // Image hash from Meta API
+  metaVideoId?: string; // Video ID from Meta API
+  uploadStatus?: "pending" | "uploading" | "success" | "error"; // Upload status
+  uploadProgress?: number; // Upload progress 0-100
+  uploadError?: string; // Error message if upload failed
+  googleDriveFileId?: string; // Google Drive file ID for server-side upload
 }
 
 interface AdData {
@@ -189,6 +196,49 @@ const combineHookAndBody = (hook: string, body: string): string => {
   
   // Always add a blank line between hook and body
   return `${trimmedHook}\n\n${trimmedBody}`;
+};
+
+// Extract thumbnail from video (first frame at 1 second)
+const extractVideoThumbnail = (videoFile: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    
+    video.onloadedmetadata = () => {
+      // Seek to 1 second or 10% of duration, whichever is smaller
+      video.currentTime = Math.min(1, video.duration * 0.1);
+    };
+    
+    video.onseeked = () => {
+      // Set canvas size to video dimensions (max 320px width for thumbnail)
+      const scale = Math.min(1, 320 / video.videoWidth);
+      canvas.width = video.videoWidth * scale;
+      canvas.height = video.videoHeight * scale;
+      
+      // Draw the frame
+      ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Convert to base64
+      const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+      
+      // Cleanup
+      URL.revokeObjectURL(video.src);
+      resolve(thumbnail);
+    };
+    
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src);
+      reject(new Error('Failed to extract video thumbnail'));
+    };
+    
+    // Load video from file
+    video.src = URL.createObjectURL(videoFile);
+  });
 };
 
 export default function Home() {
@@ -336,6 +386,15 @@ export default function Home() {
 
   // Mutation to save ad account settings
   const saveAdAccountSettingsMutation = trpc.meta.saveAdAccountSettings.useMutation();
+
+  // Mutations for direct Meta upload
+  const uploadImageToMetaMutation = (trpc.meta as any).uploadImageToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
+  const uploadVideoToMetaMutation = (trpc.meta as any).uploadVideoToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
+  const uploadFromGoogleDriveMutation = (trpc.meta as any).uploadFromGoogleDriveToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
+
+  // State for upload progress
+  const [isUploadingToMeta, setIsUploadingToMeta] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ total: number; completed: number; failed: number }>({ total: 0, completed: 0, failed: 0 });
 
   // Auto-connect if we have a saved token (from DB or localStorage)
   useEffect(() => {
@@ -795,6 +854,126 @@ export default function Home() {
     
     return groups;
   };
+
+  // Upload all media to Meta API (get hashes/video IDs)
+  const handleUploadToMeta = async () => {
+    if (mediaPool.length === 0) {
+      toast.error("No media to upload");
+      return;
+    }
+
+    if (!fbAccessToken || !selectedAdAccount) {
+      toast.error("Please connect Facebook and select an ad account first");
+      return;
+    }
+
+    setIsUploadingToMeta(true);
+    setUploadProgress({ total: mediaPool.length, completed: 0, failed: 0 });
+
+    const updatedMedia: MediaFile[] = [...mediaPool];
+    let completed = 0;
+    let failed = 0;
+
+    for (let i = 0; i < updatedMedia.length; i++) {
+      const media = updatedMedia[i];
+      
+      // Skip if already uploaded
+      if (media.metaHash || media.metaVideoId) {
+        completed++;
+        setUploadProgress(prev => ({ ...prev, completed }));
+        continue;
+      }
+
+      // Update status to uploading
+      updatedMedia[i] = { ...media, uploadStatus: 'uploading', uploadProgress: 0 };
+      setMediaPool([...updatedMedia]);
+
+      try {
+        if (media.type === 'image') {
+          // Upload image to Meta
+          const result = await uploadImageToMetaMutation.mutateAsync({
+            accessToken: fbAccessToken,
+            adAccountId: selectedAdAccount,
+            imageBase64: media.base64,
+            fileName: media.name,
+          });
+          
+          updatedMedia[i] = {
+            ...media,
+            metaHash: result.hash,
+            uploadStatus: 'success',
+            uploadProgress: 100,
+          };
+          completed++;
+        } else {
+          // Upload video to Meta
+          const result = await uploadVideoToMetaMutation.mutateAsync({
+            accessToken: fbAccessToken,
+            adAccountId: selectedAdAccount,
+            videoBase64: media.base64,
+            fileName: media.name,
+          });
+          
+          updatedMedia[i] = {
+            ...media,
+            metaVideoId: result.videoId,
+            thumbnail: result.thumbnailUrl || media.thumbnail,
+            uploadStatus: 'success',
+            uploadProgress: 100,
+          };
+          completed++;
+        }
+      } catch (error: any) {
+        console.error(`[Upload] Failed for ${media.name}:`, error);
+        updatedMedia[i] = {
+          ...media,
+          uploadStatus: 'error',
+          uploadError: error.message || 'Upload failed',
+        };
+        failed++;
+      }
+
+      setUploadProgress({ total: mediaPool.length, completed, failed });
+      setMediaPool([...updatedMedia]);
+    }
+
+    setIsUploadingToMeta(false);
+
+    if (failed === 0) {
+      toast.success(`All ${completed} files uploaded to Meta!`);
+    } else {
+      toast.warning(`${completed} uploaded, ${failed} failed. Click "Retry Failed" to try again.`);
+    }
+  };
+
+  // Retry failed uploads
+  const handleRetryFailed = async () => {
+    const failedMedia = mediaPool.filter(m => m.uploadStatus === 'error');
+    if (failedMedia.length === 0) {
+      toast.info("No failed uploads to retry");
+      return;
+    }
+
+    // Reset failed items to pending
+    setMediaPool(prev => prev.map(m => 
+      m.uploadStatus === 'error' 
+        ? { ...m, uploadStatus: 'pending', uploadError: undefined }
+        : m
+    ));
+
+    // Re-run upload
+    await handleUploadToMeta();
+  };
+
+  // Check if all media is uploaded
+  const allMediaUploaded = useMemo(() => {
+    return mediaPool.length > 0 && mediaPool.every(m => m.metaHash || m.metaVideoId);
+  }, [mediaPool]);
+
+  // Count failed uploads
+  const failedUploadsCount = useMemo(() => {
+    return mediaPool.filter(m => m.uploadStatus === 'error').length;
+  }, [mediaPool]);
 
   // Distribute media into ad sets
   const handleDistribute = () => {
@@ -1635,7 +1814,7 @@ export default function Home() {
                 </div>
               ) : (
                   <div className="space-y-2">
-                    {/* Grouped media display */}
+                    {/* Grouped media display with upload status */}
                     {(() => {
                       const groups = groupMediaByPrefix(mediaPool);
                       return Array.from(groups.entries()).map(([prefix, media]) => (
@@ -1645,6 +1824,16 @@ export default function Home() {
                             <span className="text-[10px] text-muted-foreground">
                               {media.map(m => m.aspectRatio).join(" + ")}
                             </span>
+                            {/* Upload status indicator */}
+                            {media.every(m => m.metaHash || m.metaVideoId) && (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                            )}
+                            {media.some(m => m.uploadStatus === 'error') && (
+                              <XCircle className="h-3.5 w-3.5 text-red-500" />
+                            )}
+                            {media.some(m => m.uploadStatus === 'uploading') && (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                            )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1653,7 +1842,7 @@ export default function Home() {
                               }}
                               className="w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
                             >
-                              <XCircle className="h-2.5 w-2.5" />
+                              <Trash2 className="h-2.5 w-2.5" />
                             </button>
                           </div>
                           <div className="flex gap-1">
@@ -1662,8 +1851,29 @@ export default function Home() {
                                 {m.type === "image" ? (
                                   <img src={m.preview} alt="" className="w-full h-full object-cover" />
                                 ) : (
-                                  <div className="w-full h-full flex items-center justify-center bg-slate-800">
-                                    <Play className="h-3 w-3 text-white" />
+                                  <div className="w-full h-full flex items-center justify-center bg-slate-800 relative">
+                                    {m.thumbnail ? (
+                                      <img src={m.thumbnail} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                      <Play className="h-3 w-3 text-white" />
+                                    )}
+                                    <Play className="absolute h-3 w-3 text-white drop-shadow-lg" />
+                                  </div>
+                                )}
+                                {/* Upload status overlay */}
+                                {m.uploadStatus === 'uploading' && (
+                                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                                  </div>
+                                )}
+                                {m.uploadStatus === 'success' && (
+                                  <div className="absolute top-0.5 right-0.5">
+                                    <CheckCircle2 className="h-3 w-3 text-green-500 drop-shadow" />
+                                  </div>
+                                )}
+                                {m.uploadStatus === 'error' && (
+                                  <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center">
+                                    <XCircle className="h-4 w-4 text-red-500" />
                                   </div>
                                 )}
                                 <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[6px] px-0.5 text-center truncate" title={m.name}>
@@ -1678,10 +1888,77 @@ export default function Home() {
                   </div>
                 )}
             </div>
+
+            {/* Upload to Meta section */}
+            {mediaPool.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {/* Progress bar */}
+                {isUploadingToMeta && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Uploading to Meta...</span>
+                      <span>{uploadProgress.completed + uploadProgress.failed}/{uploadProgress.total}</span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
+                        style={{ width: `${((uploadProgress.completed + uploadProgress.failed) / uploadProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    {uploadProgress.failed > 0 && (
+                      <p className="text-xs text-red-500">{uploadProgress.failed} failed</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Upload button and status */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleUploadToMeta();
+                    }}
+                    disabled={isUploadingToMeta || !fbConnected || !selectedAdAccount || allMediaUploaded}
+                    className="flex-1 h-10 text-sm font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                  >
+                    {isUploadingToMeta ? (
+                      <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Uploading...</>
+                    ) : allMediaUploaded ? (
+                      <><CheckCircle2 className="h-4 w-4 mr-2" /> All Uploaded to Meta</>
+                    ) : (
+                      <><Upload className="h-4 w-4 mr-2" /> UPLOAD TO META</>
+                    )}
+                  </Button>
+
+                  {/* Retry Failed button */}
+                  {failedUploadsCount > 0 && !isUploadingToMeta && (
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRetryFailed();
+                      }}
+                      variant="outline"
+                      className="h-10 text-sm border-red-300 text-red-600 hover:bg-red-50"
+                    >
+                      Retry Failed ({failedUploadsCount})
+                    </Button>
+                  )}
+                </div>
+
+                {/* Status message */}
+                {!fbConnected && (
+                  <p className="text-xs text-amber-600">Connect Facebook first to upload</p>
+                )}
+                {fbConnected && !selectedAdAccount && (
+                  <p className="text-xs text-amber-600">Select an Ad Account first</p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Step 3: Establish Nr of Adsets */}
+        {/* Step 3: Establish Nr of Adsets - Only show after upload */}
+        {allMediaUploaded && (
         <Card>
           <CardHeader className="py-1 px-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -1732,6 +2009,7 @@ export default function Home() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Step 4: Preview (only shown after Distribute) */}
         {showPreview && adSetsPreview.length > 0 && (

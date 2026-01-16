@@ -400,3 +400,21 @@
 - [x] Salvare token long-lived în DB
 - [x] Auto-refresh la login
 - [x] Frontend actualizează token-ul cu versiunea long-lived
+
+
+## Stream Direct Upload + UI Step 2 - Round 21
+
+### Backend
+- [x] Endpoint upload direct pe Meta pentru imagini (returnează hash)
+- [x] Endpoint upload direct pe Meta pentru video (returnează video_id)
+- [x] Endpoint upload din Google Drive direct pe Meta (server-side)
+- [x] Păstrează funcțiile Bunny ca backup
+
+### Frontend
+- [x] Extragere thumbnail local pentru video (primul frame)
+- [x] UI Step 2 - progress bar per fișier
+- [x] UI Step 2 - buton "UPLOAD TO META"
+- [x] Step 3+ apar doar după upload complet
+- [x] Buton "Retry Failed" pentru fișiere eșuate
+- [x] Thumbnail vizibil în toate step-urile (2, 3, 4, 5)
+- [x] Status indicator per grup (success/error/uploading)
