@@ -1768,9 +1768,38 @@ export default function Home() {
           // Process media - fetch from CDN if needed
           console.log(`[Media Processing] Ad: ${ad.adName}, Media count: ${ad.media.length}`);
           const processedMedia = await Promise.all(ad.media.map(async (m) => {
-            let base64Data = "";
-            
             console.log(`[Media Processing] Processing: ${m.name}`);
+            console.log(`[Media Processing]   - type: ${m.type}`);
+            console.log(`[Media Processing]   - metaVideoId: ${m.metaVideoId || 'none'}`);
+            console.log(`[Media Processing]   - metaHash: ${m.metaHash || 'none'}`);
+            
+            // If video already uploaded to Meta, skip base64 processing
+            if (m.type === 'video' && m.metaVideoId) {
+              console.log(`[Media Processing]   - Using pre-uploaded video ID: ${m.metaVideoId}`);
+              return {
+                filename: m.name,
+                base64: '', // No need for base64, we have metaVideoId
+                type: m.type,
+                aspectRatio: m.aspectRatio,
+                metaHash: m.metaHash,
+                metaVideoId: m.metaVideoId,
+              };
+            }
+            
+            // If image already uploaded to Meta, skip base64 processing
+            if (m.type === 'image' && m.metaHash) {
+              console.log(`[Media Processing]   - Using pre-uploaded image hash: ${m.metaHash}`);
+              return {
+                filename: m.name,
+                base64: '', // No need for base64, we have metaHash
+                type: m.type,
+                aspectRatio: m.aspectRatio,
+                metaHash: m.metaHash,
+                metaVideoId: m.metaVideoId,
+              };
+            }
+            
+            let base64Data = "";
             console.log(`[Media Processing]   - base64 length: ${m.base64?.length || 0}`);
             console.log(`[Media Processing]   - cdnUrl: ${m.cdnUrl || 'none'}`);
             
@@ -2802,8 +2831,8 @@ export default function Home() {
                                         key={m.id}
                                         className="rounded overflow-hidden bg-muted"
                                         style={{
-                                          width: m.type === "video" ? "200px" : "120px",
-                                          height: m.type === "video" ? "112px" : "120px",
+                                          width: m.type === "video" ? "112px" : "120px",
+                                          height: m.type === "video" ? "200px" : "120px",
                                         }}
                                       >
                                         {m.type === "image" ? (

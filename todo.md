@@ -526,3 +526,10 @@
 - [x] Hide AdName Composer when only videos in media pool
 - [x] Auto-generate AdSet Name from video pattern (T4_C1_E1_AD2_HOOK1_EVA_1 → T4_C1_E1_AD2_EVA_1_HOOK1-3)
 
+
+## Bug Fix - Round 31
+
+### Video Display Issues
+- [x] Fix: Video thumbnail afișat 16x9 în loc de 9x16 la Step 4
+- [x] Fix: Eroare 413 la publish video - folosește metaVideoId în loc de base64
+
