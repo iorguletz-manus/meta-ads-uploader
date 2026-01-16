@@ -682,10 +682,11 @@ export default function Home() {
     // Get last folder from localStorage
     const lastFolderId = localStorage.getItem(LS_KEYS.GOOGLE_DRIVE_LAST_FOLDER);
     
-    // Create view for regular Drive with folder navigation
+    // Create view for regular Drive with folder navigation (List view)
     const docsView = new google.picker.DocsView(google.picker.ViewId.DOCS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(false)
+      .setMode(google.picker.DocsViewMode.LIST) // List view by default
       .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
     
     // If we have a last folder, set it as the parent
@@ -693,11 +694,12 @@ export default function Home() {
       docsView.setParent(lastFolderId);
     }
     
-    // Create view for Shared Drives
+    // Create view for Shared Drives (List view)
     const sharedDriveView = new google.picker.DocsView(google.picker.ViewId.DOCS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(false)
       .setEnableDrives(true)
+      .setMode(google.picker.DocsViewMode.LIST) // List view by default
       .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
     
     // Build picker with Shared Drives as the first/default view
@@ -737,6 +739,30 @@ export default function Home() {
       // Create MediaFile entries without downloading - just save IDs
       const newMedia: MediaFile[] = [];
       
+      // Helper function to get real thumbnail from Google Drive API
+      const getRealThumbnail = async (fileId: string): Promise<string> => {
+        try {
+          const response = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?fields=thumbnailLink,hasThumbnail`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
+          if (response.ok) {
+            const data = await response.json();
+            if (data.thumbnailLink) {
+              // Replace size parameter to get larger thumbnail
+              return data.thumbnailLink.replace('=s220', '=s400');
+            }
+          }
+        } catch (error) {
+          console.error('Failed to get thumbnail for', fileId, error);
+        }
+        return '';
+      };
+      
       for (const file of files) {
         const isVideo = file.mimeType?.startsWith('video/');
         const isImage = file.mimeType?.startsWith('image/');
@@ -754,10 +780,18 @@ export default function Home() {
         else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
         else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
         
-        // Get thumbnail URL from Google Drive
-        const thumbnailUrl = file.thumbnails && file.thumbnails.length > 0 
-          ? file.thumbnails[file.thumbnails.length - 1].url 
-          : file.iconUrl || '';
+        // Get real thumbnail from Google Drive API (especially important for videos)
+        let thumbnailUrl = '';
+        if (isVideo) {
+          // For videos, always fetch real thumbnail from API
+          thumbnailUrl = await getRealThumbnail(file.id);
+          console.log(`[Google Drive] Video thumbnail for ${file.name}:`, thumbnailUrl || 'not available');
+        } else {
+          // For images, use picker thumbnail or fetch from API
+          thumbnailUrl = file.thumbnails && file.thumbnails.length > 0 
+            ? file.thumbnails[file.thumbnails.length - 1].url 
+            : await getRealThumbnail(file.id);
+        }
         
         const mediaFile: MediaFile = {
           id: `gdrive_${file.id}_${Date.now()}`,

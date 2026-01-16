@@ -446,6 +446,8 @@
 ## Google Drive UI - Round 25
 
 - [x] Shared Drives ca tab principal în Google Picker (primul view)
+- [x] Fix thumbnail-uri video - obține thumbnail real via Google Drive API (nu iconita generică)
+- [x] Google Picker - List view ca default (nu Grid)
 
 
 ## Bug Fix - Round 22
