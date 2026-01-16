@@ -552,3 +552,11 @@
 
 ### Video Ad Creation
 - [x] Fix image_hash error for video ads - use Meta's auto-generated thumbnail URL (image_url) instead of requiring separate image upload
+
+## UI Improvements - Round 18
+
+### Bunny CDN Upload Progress
+- [x] Add visible progress bar for Bunny CDN upload (large video files)
+- [x] Show upload percentage during browser-to-Bunny transfer
+- [x] Make uploads parallel (all videos upload simultaneously)
+- [x] Show individual progress bar for each media item in UI

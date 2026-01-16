@@ -1278,37 +1278,57 @@ export default function Home() {
     }
 
     setIsUploadingToMeta(true);
-    setUploadProgress({ total: mediaPool.length, completed: 0, failed: 0 });
-
-    const updatedMedia: MediaFile[] = [...mediaPool];
-    let completed = 0;
-    let failed = 0;
-
+    
     // Get Google access token from localStorage (saved during picker callback)
     const googleAccessToken = localStorage.getItem('google_access_token_temp') || '';
     console.log('[handleUploadToMeta] googleAccessToken exists:', !!googleAccessToken, 'length:', googleAccessToken.length);
 
-    for (let i = 0; i < updatedMedia.length; i++) {
-      const media = updatedMedia[i];
-      
+    // Filter media that needs uploading
+    const mediaToUpload = mediaPool.filter(m => !m.metaHash && !m.metaVideoId);
+    const alreadyUploaded = mediaPool.length - mediaToUpload.length;
+    
+    setUploadProgress({ total: mediaPool.length, completed: alreadyUploaded, failed: 0 });
+    
+    // Mark all pending items as uploading
+    const initialUpdatedMedia = mediaPool.map(m => 
+      (!m.metaHash && !m.metaVideoId) 
+        ? { ...m, uploadStatus: 'uploading' as const, uploadProgress: 0 }
+        : m
+    );
+    setMediaPool(initialUpdatedMedia);
+
+    // Create a ref to track current state across parallel uploads
+    const mediaStateRef = { current: [...initialUpdatedMedia] };
+    const progressRef = { completed: alreadyUploaded, failed: 0 };
+
+    // Helper to update a single media item's state
+    const updateMediaItem = (index: number, updates: Partial<MediaFile>) => {
+      mediaStateRef.current[index] = { ...mediaStateRef.current[index], ...updates };
+      setMediaPool([...mediaStateRef.current]);
+    };
+
+    // Helper to update progress counters
+    const updateProgress = (type: 'completed' | 'failed') => {
+      progressRef[type]++;
+      setUploadProgress({ 
+        total: mediaPool.length, 
+        completed: progressRef.completed, 
+        failed: progressRef.failed 
+      });
+    };
+
+    // Upload function for a single media item
+    const uploadSingleMedia = async (media: MediaFile, index: number): Promise<void> => {
       // Skip if already uploaded
       if (media.metaHash || media.metaVideoId) {
-        completed++;
-        setUploadProgress(prev => ({ ...prev, completed }));
-        continue;
+        return;
       }
-
-      // Update status to uploading
-      updatedMedia[i] = { ...media, uploadStatus: 'uploading', uploadProgress: 0 };
-      setMediaPool([...updatedMedia]);
 
       try {
         // Check if this is a PUBLIC folder file - use direct file_url method
         if (media.isPublicFolder && media.publicDownloadUrl) {
-          console.log(`[Upload] PUBLIC FOLDER file: ${media.name}`);
-          console.log(`[Upload] publicDownloadUrl: ${media.publicDownloadUrl}`);
+          console.log(`[Upload ${index}] PUBLIC FOLDER file: ${media.name}`);
           
-          // Use new mutation that uploads via file_url
           const result = await uploadFromPublicUrlMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
@@ -1318,32 +1338,26 @@ export default function Home() {
           });
           
           if (result.type === 'video') {
-            updatedMedia[i] = {
-              ...media,
+            updateMediaItem(index, {
               metaVideoId: result.videoId,
               metaThumbnailUrl: result.thumbnailUrl,
               uploadStatus: 'success',
               uploadProgress: 100,
-            };
+            });
           } else {
-            updatedMedia[i] = {
-              ...media,
+            updateMediaItem(index, {
               metaHash: result.hash,
               uploadStatus: 'success',
               uploadProgress: 100,
-            };
+            });
           }
-          completed++;
+          updateProgress('completed');
         }
         // Check if this is a Google Drive file (server-to-server upload)
         else if (media.isGoogleDrive && media.googleDriveFileId) {
-          console.log(`[Upload] Google Drive file: ${media.name} - using server-to-server`);
-          console.log(`[Upload] fileId: ${media.googleDriveFileId}`);
-          console.log(`[Upload] mimeType: ${media.googleDriveMimeType}`);
-          console.log(`[Upload] googleAccessToken length: ${googleAccessToken.length}`);
+          console.log(`[Upload ${index}] Google Drive file: ${media.name}`);
           
           if (!googleAccessToken) {
-            console.error('[Upload] ERROR: No Google access token!');
             throw new Error('Google access token not found. Please re-import from Google Drive.');
           }
           
@@ -1357,25 +1371,23 @@ export default function Home() {
           });
           
           if (result.type === 'video') {
-            updatedMedia[i] = {
-              ...media,
+            updateMediaItem(index, {
               metaVideoId: result.videoId,
               metaThumbnailUrl: result.thumbnailUrl,
               uploadStatus: 'success',
               uploadProgress: 100,
-            };
+            });
           } else {
-            updatedMedia[i] = {
-              ...media,
+            updateMediaItem(index, {
               metaHash: result.hash,
               uploadStatus: 'success',
               uploadProgress: 100,
-            };
+            });
           }
-          completed++;
+          updateProgress('completed');
         } else if (media.type === 'image') {
           // Local file - Upload image to Meta via base64
-          console.log(`[Upload] Local image: ${media.name}`);
+          console.log(`[Upload ${index}] Local image: ${media.name}`);
           const result = await uploadImageToMetaMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
@@ -1383,30 +1395,27 @@ export default function Home() {
             fileName: media.name,
           });
           
-          updatedMedia[i] = {
-            ...media,
+          updateMediaItem(index, {
             metaHash: result.hash,
             uploadStatus: 'success',
             uploadProgress: 100,
-          };
-          completed++;
+          });
+          updateProgress('completed');
         } else {
           // Local file - Upload video to Meta
-          console.log(`[Upload] Local video: ${media.name}`);
+          console.log(`[Upload ${index}] Local video: ${media.name}`);
           
-          // Check if we have the original file or base64 data
           if (media.originalFile) {
             // Upload directly to Bunny from browser, then Meta fetches from Bunny
-            console.log(`[Upload] Direct browser upload for large video: ${media.name}`);
-            console.log(`[Upload] File size: ${(media.originalFile.size / 1024 / 1024).toFixed(2)} MB`);
+            console.log(`[Upload ${index}] Direct browser upload for large video: ${media.name}`);
+            console.log(`[Upload ${index}] File size: ${(media.originalFile.size / 1024 / 1024).toFixed(2)} MB`);
             
-            // Step 1: Upload directly to Bunny from browser
             const BUNNY_STORAGE_API_KEY = '4c9257d6-aede-4ff1-bb0f9fc95279-997e-412b';
             const BUNNY_STORAGE_ZONE = 'manus-storage';
             const BUNNY_CDN_URL = 'https://manus.b-cdn.net';
             
             const now = new Date();
-            const timestamp = Date.now();
+            const timestamp = Date.now() + index; // Add index to ensure unique timestamps
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const day = String(now.getDate()).padStart(2, '0');
@@ -1417,31 +1426,54 @@ export default function Home() {
             const uniqueFileName = `${nameWithoutExt}-${timestamp}${ext}`;
             const filePath = `meta-ads-uploader/uploads/${year}/${month}/${day}/${uniqueFileName}`;
             
-            console.log(`[Upload] Uploading to Bunny: ${filePath}`);
+            console.log(`[Upload ${index}] Uploading to Bunny: ${filePath}`);
             
-            const bunnyResponse = await fetch(
-              `https://storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}/${filePath}`,
-              {
-                method: 'PUT',
-                headers: {
-                  'AccessKey': BUNNY_STORAGE_API_KEY,
-                  'Content-Type': media.originalFile.type || 'video/mp4',
-                },
-                body: media.originalFile,
-              }
-            );
+            // Use XMLHttpRequest for progress tracking
+            const bunnyUploadResult = await new Promise<{ success: boolean; error?: string }>((resolve) => {
+              const xhr = new XMLHttpRequest();
+              
+              // Track upload progress
+              xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                  const percentComplete = Math.round((event.loaded / event.total) * 100);
+                  console.log(`[Upload ${index}] Bunny progress: ${percentComplete}%`);
+                  
+                  // Update media item with progress (0-50% for Bunny, 50-100% for Meta)
+                  updateMediaItem(index, {
+                    uploadProgress: Math.round(percentComplete * 0.5),
+                  });
+                }
+              };
+              
+              xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  resolve({ success: true });
+                } else {
+                  resolve({ success: false, error: `Bunny upload failed: ${xhr.status} ${xhr.responseText}` });
+                }
+              };
+              
+              xhr.onerror = () => {
+                resolve({ success: false, error: 'Network error during Bunny upload' });
+              };
+              
+              xhr.open('PUT', `https://storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}/${filePath}`);
+              xhr.setRequestHeader('AccessKey', BUNNY_STORAGE_API_KEY);
+              xhr.setRequestHeader('Content-Type', media.originalFile!.type || 'video/mp4');
+              xhr.send(media.originalFile);
+            });
             
-            if (!bunnyResponse.ok) {
-              const errorText = await bunnyResponse.text();
-              console.error(`[Upload] Bunny upload failed:`, bunnyResponse.status, errorText);
-              throw new Error(`Bunny upload failed: ${bunnyResponse.status}`);
+            if (!bunnyUploadResult.success) {
+              throw new Error(bunnyUploadResult.error || 'Bunny upload failed');
             }
             
             const bunnyUrl = `${BUNNY_CDN_URL}/${filePath}`;
-            console.log(`[Upload] Bunny upload success: ${bunnyUrl}`);
+            console.log(`[Upload ${index}] Bunny upload success: ${bunnyUrl}`);
             
-            // Step 2: Tell Meta to fetch from Bunny URL
-            console.log(`[Upload] Sending to Meta via file_url...`);
+            // Update progress to 50% - Bunny done, starting Meta
+            updateMediaItem(index, { uploadProgress: 50 });
+            
+            console.log(`[Upload ${index}] Sending to Meta via file_url...`);
             const result = await uploadFromPublicUrlMutation.mutateAsync({
               accessToken: fbAccessToken,
               adAccountId: selectedAdAccount,
@@ -1451,16 +1483,15 @@ export default function Home() {
               isVideo: true,
             });
             
-            console.log(`[Upload] Meta upload success! Video ID: ${result.videoId}`);
+            console.log(`[Upload ${index}] Meta upload success! Video ID: ${result.videoId}`);
             
-            updatedMedia[i] = {
-              ...media,
+            updateMediaItem(index, {
               metaVideoId: result.videoId,
               metaThumbnailUrl: result.thumbnailUrl,
               uploadStatus: 'success',
               uploadProgress: 100,
-            };
-            completed++;
+            });
+            updateProgress('completed');
           } else if (media.base64) {
             // Fallback to base64 for smaller files
             const result = await uploadVideoToMetaMutation.mutateAsync({
@@ -1470,39 +1501,35 @@ export default function Home() {
               fileName: media.name,
             });
             
-            updatedMedia[i] = {
-              ...media,
+            updateMediaItem(index, {
               metaVideoId: result.videoId,
               metaThumbnailUrl: result.thumbnailUrl,
               thumbnail: result.thumbnailUrl || media.thumbnail,
               uploadStatus: 'success',
               uploadProgress: 100,
-            };
-            completed++;
+            });
+            updateProgress('completed');
           } else {
             throw new Error(`No video data for ${media.name}. Please re-add the video.`);
           }
         }
       } catch (error: any) {
-        console.error(`[Upload] ====== FAILED ======`);
-        console.error(`[Upload] File: ${media.name}`);
-        console.error(`[Upload] Error message:`, error.message);
-        console.error(`[Upload] Full error:`, JSON.stringify(error, null, 2));
-        console.error(`[Upload] Error stack:`, error.stack);
-        updatedMedia[i] = {
-          ...media,
+        console.error(`[Upload ${index}] FAILED: ${media.name}`, error.message);
+        updateMediaItem(index, {
           uploadStatus: 'error',
           uploadError: error.message || 'Upload failed',
-        };
-        failed++;
+        });
+        updateProgress('failed');
       }
+    };
 
-      setUploadProgress({ total: mediaPool.length, completed, failed });
-      setMediaPool([...updatedMedia]);
-    }
+    // Run all uploads in parallel
+    const uploadPromises = mediaPool.map((media, index) => uploadSingleMedia(media, index));
+    await Promise.all(uploadPromises);
 
     setIsUploadingToMeta(false);
 
+    const { completed, failed } = progressRef;
     if (failed === 0) {
       toast.success(`All ${completed} files uploaded to Meta!`);
     } else {
@@ -2563,8 +2590,16 @@ export default function Home() {
                                 )}
                                 {/* Upload status overlay */}
                                 {m.uploadStatus === 'uploading' && (
-                                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1">
+                                    <Loader2 className="h-3 w-3 animate-spin text-white" />
+                                    {/* Progress bar */}
+                                    <div className="w-[80%] h-1 bg-white/30 rounded-full overflow-hidden">
+                                      <div 
+                                        className="h-full bg-gradient-to-r from-blue-400 to-purple-400 transition-all duration-300"
+                                        style={{ width: `${m.uploadProgress || 0}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[8px] text-white font-medium">{m.uploadProgress || 0}%</span>
                                   </div>
                                 )}
                                 {m.uploadStatus === 'success' && (
