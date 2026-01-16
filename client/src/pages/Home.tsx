@@ -615,23 +615,31 @@ export default function Home() {
   // Mutations
   const batchCreateAdsMutation = trpc.meta.batchCreateAds.useMutation();
 
-  // Debug: Get all ad fields
+  // Debug: Get all ad fields mutation
+  const getAdAllFieldsMutation = (trpc.meta as any).getAdAllFields?.useMutation();
+  
   const handleShowAllSettings = async () => {
     if (!fbAccessToken || !selectedAd) {
       toast.error("Select an ad first");
       return;
     }
+    if (!getAdAllFieldsMutation) {
+      toast.error("Feature not available - please refresh the page");
+      return;
+    }
     try {
-      const result = await fetch(`/api/trpc/meta.getAdAllFields?input=${encodeURIComponent(JSON.stringify({ accessToken: fbAccessToken, adId: selectedAd }))}`);
-      const data = await result.json();
-      if (data.result?.data?.formatted) {
-        setAllSettingsData(data.result.data.formatted);
+      const result = await getAdAllFieldsMutation.mutateAsync({ 
+        accessToken: fbAccessToken, 
+        adId: selectedAd 
+      });
+      if (result?.formatted) {
+        setAllSettingsData(result.formatted);
         setShowAllSettingsDialog(true);
       } else {
         toast.error("Failed to get ad settings");
       }
     } catch (err) {
-      toast.error("Error fetching ad settings");
+      toast.error("Error fetching ad settings: " + (err as Error).message);
     }
   };
 
