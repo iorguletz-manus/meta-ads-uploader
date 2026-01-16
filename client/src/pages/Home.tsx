@@ -33,7 +33,7 @@ import { toast } from "sonner";
 // Google API constants
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
-const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
 // Load Google API scripts
 let googleApiLoaded = false;
@@ -108,6 +108,11 @@ interface MediaFile {
   googleDriveMimeType?: string; // MIME type from Google Drive
   googleDriveThumbnail?: string; // Thumbnail URL from Google Drive
   isGoogleDrive?: boolean; // Flag to indicate this is a Google Drive file
+  // Public folder fields
+  isPublicFolder?: boolean; // Flag to indicate this is from a public folder
+  publicDownloadUrl?: string; // Direct download URL for public files
+  // Original file for large uploads
+  originalFile?: File; // Keep original File object for multipart upload
 }
 
 interface AdData {
@@ -407,6 +412,7 @@ export default function Home() {
   const uploadImageToMetaMutation = (trpc.meta as any).uploadImageToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
   const uploadVideoToMetaMutation = (trpc.meta as any).uploadVideoToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
   const uploadFromGoogleDriveMutation = (trpc.meta as any).uploadFromGoogleDriveToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
+  const uploadFromPublicUrlMutation = (trpc.meta as any).uploadFromPublicUrl?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
 
   // Google token management
   const googleTokenQuery = (trpc as any).google?.getToken?.useQuery(undefined, {
@@ -615,6 +621,11 @@ export default function Home() {
   // Google Drive state for picker
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [isLoadingGoogleDrive, setIsLoadingGoogleDrive] = useState(false);
+  
+  // Google Drive #2 - Public folder method
+  const [showPublicFolderInput, setShowPublicFolderInput] = useState(false);
+  const [publicFolderUrl, setPublicFolderUrl] = useState('');
+  const [isLoadingPublicFolder, setIsLoadingPublicFolder] = useState(false);
 
   // Google Drive Connect - opens picker
   // Exchange Google auth code mutation
@@ -633,65 +644,39 @@ export default function Home() {
       await loadGoogleIdentity();
       await loadGooglePicker();
 
-      // Check if we have a saved token from DB
-      const savedToken = googleTokenQuery?.data;
-      if (savedToken?.accessToken) {
-        console.log("[Google Drive] Using saved token from DB");
-        setGoogleAccessToken(savedToken.accessToken);
-        openGooglePicker(savedToken.accessToken);
-        return;
-      }
-
       // Check if we have token in state
       if (googleAccessToken) {
         console.log("[Google Drive] Using token from state");
         openGooglePicker(googleAccessToken);
         return;
       }
+      
+      console.log("[Google Drive] Requesting new token with implicit flow...");
 
-      // Use Authorization Code flow to get refresh token (for 60-day persistence)
+      // Use Implicit flow (simpler, works immediately)
       const google = (window as any).google;
-      const codeClient = google.accounts.oauth2.initCodeClient({
+      const tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: GOOGLE_SCOPES,
-        ux_mode: 'popup',
-        callback: async (response: any) => {
-          if (response.code) {
-            console.log("[Google Drive] Got authorization code, exchanging for tokens...");
-            try {
-              // Exchange code for tokens on server (gets refresh token)
-              const result = await exchangeGoogleCodeMutation?.mutateAsync({
-                code: response.code,
-                redirectUri: window.location.origin,
-              });
-              
-              if (result?.accessToken) {
-                console.log("[Google Drive] Got tokens! Has refresh token:", result.hasRefreshToken);
-                setGoogleAccessToken(result.accessToken);
-                
-                // Refetch the token query to update cache
-                googleTokenQuery?.refetch();
-                
-                openGooglePicker(result.accessToken);
-              } else {
-                toast.error("Failed to get access token");
-                setIsLoadingGoogleDrive(false);
-              }
-            } catch (err: any) {
-              console.error("[Google Drive] Token exchange failed:", err);
-              toast.error(err.message || "Failed to authenticate with Google");
-              setIsLoadingGoogleDrive(false);
-            }
+        callback: (response: any) => {
+          if (response.access_token) {
+            console.log("[Google Drive] Got access token!");
+            setGoogleAccessToken(response.access_token);
+            
+            // Save to localStorage for upload
+            localStorage.setItem('google_access_token_temp', response.access_token);
+            
+            openGooglePicker(response.access_token);
           } else if (response.error) {
             console.error("[Google Drive] Auth error:", response.error);
-            toast.error("Google authentication failed");
+            toast.error("Google authentication failed: " + response.error);
             setIsLoadingGoogleDrive(false);
           }
         },
       });
 
-      // Request authorization code (will open popup)
-      codeClient.requestCode();
+      // Request token (will open popup)
+      tokenClient.requestAccessToken();
     } catch (error) {
       console.error("Google Drive error:", error);
       toast.error("Failed to connect to Google Drive");
@@ -727,16 +712,22 @@ export default function Home() {
       .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
     
     // Build picker with Shared Drives as the first/default view
+    console.log("[openGooglePicker] Building picker...");
     const picker = new google.picker.PickerBuilder()
       .addView(sharedDriveView) // Shared Drives first (default tab)
       .addView(docsView) // My Drive second
       .setOAuthToken(accessToken)
       .setDeveloperKey(GOOGLE_API_KEY)
-      .setCallback((data: any) => handlePickerCallback(data, accessToken))
+      .setCallback((data: any) => {
+        console.log("[Picker RAW CALLBACK] Received data:", data);
+        console.log("[Picker RAW CALLBACK] data.action:", data?.action);
+        handlePickerCallback(data, accessToken);
+      })
       .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
       .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
       .setTitle('Select Images or Videos')
       .build();
+    console.log("[openGooglePicker] Picker built, showing...");
     
     picker.setVisible(true);
     setIsLoadingGoogleDrive(false);
@@ -744,10 +735,19 @@ export default function Home() {
 
   // Handle picker selection - saves only file IDs, no download
   const handlePickerCallback = async (data: any, accessToken: string) => {
+    console.log("[Picker] ====== CALLBACK START ======");
+    console.log("[Picker] data.action:", data.action);
+    console.log("[Picker] data:", JSON.stringify(data, null, 2));
+    
     const google = (window as any).google;
+    
+    console.log("[Picker] google.picker.Action.PICKED:", google.picker.Action.PICKED);
+    console.log("[Picker] Is PICKED?", data.action === google.picker.Action.PICKED);
     
     if (data.action === google.picker.Action.PICKED) {
       const files = data.docs;
+      console.log("[Picker] Files selected:", files.length);
+      console.log("[Picker] Files:", JSON.stringify(files, null, 2));
       
       // Save the parent folder ID for next time
       if (files.length > 0 && files[0].parentId) {
@@ -899,25 +899,180 @@ export default function Home() {
           googleDriveThumbnail: thumbnailUrl,
         };
         
+        console.log("[Picker] Created mediaFile:", mediaFile.name, "isGoogleDrive:", mediaFile.isGoogleDrive, "fileId:", mediaFile.googleDriveFileId);
         newMedia.push(mediaFile);
       }
       
+      console.log("[Picker] Total newMedia to add:", newMedia.length);
+      
       if (newMedia.length > 0) {
+        console.log("[Picker] Adding to mediaPool...");
         setMediaPool(prev => {
+          console.log("[Picker] Previous mediaPool length:", prev.length);
           const updated = [...prev, ...newMedia];
+          console.log("[Picker] Updated mediaPool length:", updated.length);
           // Save to localStorage (without base64 for Google Drive files)
           const toSave = updated.map(m => ({
             ...m,
             base64: m.isGoogleDrive ? '' : m.base64 // Don't save base64 for Google Drive files
           }));
           localStorage.setItem(LS_KEYS.MEDIA_POOL, JSON.stringify(toSave));
+          console.log("[Picker] Saved to localStorage");
           return updated;
         });
+        console.log("[Picker] SUCCESS - Added files to media pool");
         toast.success(`Added ${newMedia.length} file(s) from Google Drive. Click "UPLOAD TO META" to upload.`);
+      } else {
+        console.log("[Picker] WARNING - No media files to add!");
       }
     } else if (data.action === google.picker.Action.CANCEL) {
-      // User cancelled
+      console.log("[Picker] User cancelled picker");
+    } else {
+      console.log("[Picker] Unknown action:", data.action);
     }
+    console.log("[Picker] ====== CALLBACK END ======");
+  };
+
+  // Handle public folder import (#2 method)
+  const handlePublicFolderImport = async () => {
+    if (!publicFolderUrl) {
+      toast.error("Please enter a Google Drive folder URL");
+      return;
+    }
+    
+    console.log("[PublicFolder] ====== START ======");
+    console.log("[PublicFolder] URL:", publicFolderUrl);
+    
+    // Extract folder ID from URL
+    // Format: https://drive.google.com/drive/folders/FOLDER_ID?usp=sharing
+    const folderIdMatch = publicFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
+    if (!folderIdMatch) {
+      toast.error("Invalid Google Drive folder URL. Expected format: https://drive.google.com/drive/folders/FOLDER_ID");
+      return;
+    }
+    
+    const folderId = folderIdMatch[1];
+    console.log("[PublicFolder] Folder ID:", folderId);
+    
+    setIsLoadingPublicFolder(true);
+    
+    try {
+      // List files in public folder using Google Drive API (no auth needed for public folders)
+      const apiKey = GOOGLE_API_KEY;
+      const listUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents&key=${apiKey}&fields=files(id,name,mimeType,thumbnailLink,videoMediaMetadata,imageMediaMetadata)`;
+      
+      console.log("[PublicFolder] Fetching files list...");
+      const response = await fetch(listUrl);
+      const data = await response.json();
+      
+      console.log("[PublicFolder] API Response:", JSON.stringify(data, null, 2));
+      
+      if (data.error) {
+        throw new Error(data.error.message || "Failed to list files");
+      }
+      
+      const files = data.files || [];
+      console.log("[PublicFolder] Found files:", files.length);
+      
+      if (files.length === 0) {
+        toast.error("No files found in folder. Make sure the folder is public.");
+        setIsLoadingPublicFolder(false);
+        return;
+      }
+      
+      // Filter only images and videos
+      const mediaFiles = files.filter((f: any) => 
+        f.mimeType?.startsWith('video/') || f.mimeType?.startsWith('image/')
+      );
+      
+      console.log("[PublicFolder] Media files:", mediaFiles.length);
+      
+      if (mediaFiles.length === 0) {
+        toast.error("No image or video files found in folder.");
+        setIsLoadingPublicFolder(false);
+        return;
+      }
+      
+      // Create MediaFile entries
+      const newMedia: MediaFile[] = [];
+      
+      for (const file of mediaFiles) {
+        const isVideo = file.mimeType?.startsWith('video/');
+        
+        // Determine aspect ratio
+        let aspectRatio = "9x16"; // Default for videos
+        if (file.videoMediaMetadata) {
+          const { width, height } = file.videoMediaMetadata;
+          if (width && height) {
+            const ratio = width / height;
+            if (ratio < 0.65) aspectRatio = "9x16";
+            else if (ratio < 0.9) aspectRatio = "4x5";
+            else if (ratio < 1.1) aspectRatio = "1x1";
+            else aspectRatio = "16x9";
+          }
+        } else if (file.imageMediaMetadata) {
+          const { width, height } = file.imageMediaMetadata;
+          if (width && height) {
+            const ratio = width / height;
+            if (ratio < 0.65) aspectRatio = "9x16";
+            else if (ratio < 0.9) aspectRatio = "4x5";
+            else if (ratio < 1.1) aspectRatio = "1x1";
+            else aspectRatio = "16x9";
+          }
+        }
+        
+        // Get thumbnail
+        let thumbnailUrl = file.thumbnailLink || '';
+        if (thumbnailUrl) {
+          thumbnailUrl = thumbnailUrl.replace('=s220', '=s400');
+        }
+        
+        // Generate public download URL
+        const publicDownloadUrl = `https://drive.google.com/uc?export=download&id=${file.id}`;
+        
+        const mediaFile: MediaFile = {
+          id: `gdrive_public_${file.id}_${Date.now()}`,
+          name: file.name,
+          base64: '',
+          aspectRatio,
+          type: isVideo ? 'video' : 'image',
+          thumbnail: thumbnailUrl,
+          uploadStatus: 'pending',
+          isGoogleDrive: true,
+          googleDriveFileId: file.id,
+          googleDriveMimeType: file.mimeType,
+          googleDriveThumbnail: thumbnailUrl,
+          isPublicFolder: true, // Mark as public folder
+          publicDownloadUrl, // Store public URL for direct Meta upload
+        };
+        
+        console.log("[PublicFolder] Added:", file.name, "URL:", publicDownloadUrl);
+        newMedia.push(mediaFile);
+      }
+      
+      // Add to media pool
+      setMediaPool(prev => {
+        const updated = [...prev, ...newMedia];
+        const toSave = updated.map(m => ({
+          ...m,
+          base64: ''
+        }));
+        localStorage.setItem(LS_KEYS.MEDIA_POOL, JSON.stringify(toSave));
+        return updated;
+      });
+      
+      toast.success(`Added ${newMedia.length} file(s) from public folder!`);
+      setShowPublicFolderInput(false);
+      setPublicFolderUrl('');
+      
+    } catch (error: any) {
+      console.error("[PublicFolder] Error:", error);
+      toast.error(error.message || "Failed to import from public folder");
+    } finally {
+      setIsLoadingPublicFolder(false);
+    }
+    
+    console.log("[PublicFolder] ====== END ======");
   };
 
   // Compress image to reduce size
@@ -1062,6 +1217,7 @@ export default function Home() {
         type: isVideo ? "video" : "image",
         thumbnail, // Video thumbnail
         uploadStatus: 'pending', // Ready to upload to Meta
+        originalFile: isVideo ? file : undefined, // Keep original file for large video uploads
       });
     }
 
@@ -1103,12 +1259,19 @@ export default function Home() {
 
   // Upload all media to Meta API (get hashes/video IDs)
   const handleUploadToMeta = async () => {
+    console.log('[handleUploadToMeta] ====== START ======');
+    console.log('[handleUploadToMeta] mediaPool.length:', mediaPool.length);
+    console.log('[handleUploadToMeta] fbAccessToken exists:', !!fbAccessToken);
+    console.log('[handleUploadToMeta] selectedAdAccount:', selectedAdAccount);
+    
     if (mediaPool.length === 0) {
+      console.log('[handleUploadToMeta] ERROR: No media to upload');
       toast.error("No media to upload");
       return;
     }
 
     if (!fbAccessToken || !selectedAdAccount) {
+      console.log('[handleUploadToMeta] ERROR: No FB token or ad account');
       toast.error("Please connect Facebook and select an ad account first");
       return;
     }
@@ -1122,6 +1285,7 @@ export default function Home() {
 
     // Get Google access token from localStorage (saved during picker callback)
     const googleAccessToken = localStorage.getItem('google_access_token_temp') || '';
+    console.log('[handleUploadToMeta] googleAccessToken exists:', !!googleAccessToken, 'length:', googleAccessToken.length);
 
     for (let i = 0; i < updatedMedia.length; i++) {
       const media = updatedMedia[i];
@@ -1138,11 +1302,46 @@ export default function Home() {
       setMediaPool([...updatedMedia]);
 
       try {
+        // Check if this is a PUBLIC folder file - use direct file_url method
+        if (media.isPublicFolder && media.publicDownloadUrl) {
+          console.log(`[Upload] PUBLIC FOLDER file: ${media.name}`);
+          console.log(`[Upload] publicDownloadUrl: ${media.publicDownloadUrl}`);
+          
+          // Use new mutation that uploads via file_url
+          const result = await uploadFromPublicUrlMutation.mutateAsync({
+            accessToken: fbAccessToken,
+            adAccountId: selectedAdAccount,
+            fileUrl: media.publicDownloadUrl,
+            fileName: media.name,
+            isVideo: media.type === 'video',
+          });
+          
+          if (result.type === 'video') {
+            updatedMedia[i] = {
+              ...media,
+              metaVideoId: result.videoId,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            };
+          } else {
+            updatedMedia[i] = {
+              ...media,
+              metaHash: result.hash,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            };
+          }
+          completed++;
+        }
         // Check if this is a Google Drive file (server-to-server upload)
-        if (media.isGoogleDrive && media.googleDriveFileId) {
+        else if (media.isGoogleDrive && media.googleDriveFileId) {
           console.log(`[Upload] Google Drive file: ${media.name} - using server-to-server`);
+          console.log(`[Upload] fileId: ${media.googleDriveFileId}`);
+          console.log(`[Upload] mimeType: ${media.googleDriveMimeType}`);
+          console.log(`[Upload] googleAccessToken length: ${googleAccessToken.length}`);
           
           if (!googleAccessToken) {
+            console.error('[Upload] ERROR: No Google access token!');
             throw new Error('Google access token not found. Please re-import from Google Drive.');
           }
           
@@ -1189,32 +1388,102 @@ export default function Home() {
           };
           completed++;
         } else {
-          // Local file - Upload video to Meta via base64
+          // Local file - Upload video to Meta
           console.log(`[Upload] Local video: ${media.name}`);
           
-          // Check if we have base64 data
-          if (!media.base64) {
-            throw new Error(`No base64 data for video ${media.name}. Please re-add the video.`);
+          // Check if we have the original file or base64 data
+          if (media.originalFile) {
+            // Upload directly to Bunny from browser, then Meta fetches from Bunny
+            console.log(`[Upload] Direct browser upload for large video: ${media.name}`);
+            console.log(`[Upload] File size: ${(media.originalFile.size / 1024 / 1024).toFixed(2)} MB`);
+            
+            // Step 1: Upload directly to Bunny from browser
+            const BUNNY_STORAGE_API_KEY = '4c9257d6-aede-4ff1-bb0f9fc95279-997e-412b';
+            const BUNNY_STORAGE_ZONE = 'manus-storage';
+            const BUNNY_CDN_URL = 'https://manus.b-cdn.net';
+            
+            const now = new Date();
+            const timestamp = Date.now();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            
+            const lastDotIndex = media.name.lastIndexOf('.');
+            const nameWithoutExt = lastDotIndex > 0 ? media.name.substring(0, lastDotIndex) : media.name;
+            const ext = lastDotIndex > 0 ? media.name.substring(lastDotIndex) : '.mp4';
+            const uniqueFileName = `${nameWithoutExt}-${timestamp}${ext}`;
+            const filePath = `meta-ads-uploader/uploads/${year}/${month}/${day}/${uniqueFileName}`;
+            
+            console.log(`[Upload] Uploading to Bunny: ${filePath}`);
+            
+            const bunnyResponse = await fetch(
+              `https://storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}/${filePath}`,
+              {
+                method: 'PUT',
+                headers: {
+                  'AccessKey': BUNNY_STORAGE_API_KEY,
+                  'Content-Type': media.originalFile.type || 'video/mp4',
+                },
+                body: media.originalFile,
+              }
+            );
+            
+            if (!bunnyResponse.ok) {
+              const errorText = await bunnyResponse.text();
+              console.error(`[Upload] Bunny upload failed:`, bunnyResponse.status, errorText);
+              throw new Error(`Bunny upload failed: ${bunnyResponse.status}`);
+            }
+            
+            const bunnyUrl = `${BUNNY_CDN_URL}/${filePath}`;
+            console.log(`[Upload] Bunny upload success: ${bunnyUrl}`);
+            
+            // Step 2: Tell Meta to fetch from Bunny URL
+            console.log(`[Upload] Sending to Meta via file_url...`);
+            const result = await uploadFromPublicUrlMutation.mutateAsync({
+              accessToken: fbAccessToken,
+              adAccountId: selectedAdAccount,
+              fileUrl: bunnyUrl,
+              fileName: media.name,
+              mimeType: media.originalFile.type || 'video/mp4',
+              isVideo: true,
+            });
+            
+            console.log(`[Upload] Meta upload success! Video ID: ${result.videoId}`);
+            
+            updatedMedia[i] = {
+              ...media,
+              metaVideoId: result.videoId,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            };
+            completed++;
+          } else if (media.base64) {
+            // Fallback to base64 for smaller files
+            const result = await uploadVideoToMetaMutation.mutateAsync({
+              accessToken: fbAccessToken,
+              adAccountId: selectedAdAccount,
+              base64Data: media.base64,
+              fileName: media.name,
+            });
+            
+            updatedMedia[i] = {
+              ...media,
+              metaVideoId: result.videoId,
+              thumbnail: result.thumbnailUrl || media.thumbnail,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            };
+            completed++;
+          } else {
+            throw new Error(`No video data for ${media.name}. Please re-add the video.`);
           }
-          
-          const result = await uploadVideoToMetaMutation.mutateAsync({
-            accessToken: fbAccessToken,
-            adAccountId: selectedAdAccount,
-            base64Data: media.base64, // Fixed: was videoBase64, should be base64Data
-            fileName: media.name,
-          });
-          
-          updatedMedia[i] = {
-            ...media,
-            metaVideoId: result.videoId,
-            thumbnail: result.thumbnailUrl || media.thumbnail,
-            uploadStatus: 'success',
-            uploadProgress: 100,
-          };
-          completed++;
         }
       } catch (error: any) {
-        console.error(`[Upload] Failed for ${media.name}:`, error);
+        console.error(`[Upload] ====== FAILED ======`);
+        console.error(`[Upload] File: ${media.name}`);
+        console.error(`[Upload] Error message:`, error.message);
+        console.error(`[Upload] Full error:`, JSON.stringify(error, null, 2));
+        console.error(`[Upload] Error stack:`, error.stack);
         updatedMedia[i] = {
           ...media,
           uploadStatus: 'error',
@@ -1322,10 +1591,39 @@ export default function Home() {
       }
 
       if (ads.length > 0) {
-        // Use first media name as adset name (without extension and aspect ratio)
-        const firstMediaName = ads[0]?.media[0]?.name || `Ad Set ${i + 1}`;
-        const rawAdsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
-        const adsetName = cleanAdsetName(rawAdsetName);
+        // Generate AdSet name from video pattern
+        // Example: T4_C1_E1_AD2_HOOK1_EVA_1, T4_C1_E1_AD2_HOOK2_EVA_1 → T4_C1_E1_AD2_EVA_1_HOOK1-2
+        const generateAdSetName = (adsInSet: AdData[]): string => {
+          const allMediaNames = adsInSet.flatMap(ad => ad.media.map(m => m.name.replace(/\.[^/.]+$/, '').toUpperCase()));
+          
+          // Try to extract HOOK numbers from video names
+          const hookPattern = /^(.+?)_HOOK(\d+)_(.+)$/;
+          const hookMatches = allMediaNames.map(name => name.match(hookPattern)).filter(Boolean);
+          
+          if (hookMatches.length > 0) {
+            // Extract prefix, hook numbers, and suffix
+            const prefix = hookMatches[0]![1];
+            const suffix = hookMatches[0]![3];
+            const hookNumbers = hookMatches.map(m => parseInt(m![2])).sort((a, b) => a - b);
+            
+            // Check if all have same prefix and suffix
+            const allSamePattern = hookMatches.every(m => m![1] === prefix && m![3] === suffix);
+            
+            if (allSamePattern && hookNumbers.length > 0) {
+              const minHook = Math.min(...hookNumbers);
+              const maxHook = Math.max(...hookNumbers);
+              // Format: PREFIX_SUFFIX_HOOKmin-max
+              return `${prefix}_${suffix}_HOOK${minHook}-${maxHook}`;
+            }
+          }
+          
+          // Fallback: use first media name cleaned
+          const firstMediaName = adsInSet[0]?.media[0]?.name || `Ad Set ${i + 1}`;
+          const rawAdsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
+          return cleanAdsetName(rawAdsetName);
+        };
+        
+        const adsetName = generateAdSetName(ads);
         
         newAdSets.push({
           id: `adset-${Date.now()}-${i}`,
@@ -2060,18 +2358,40 @@ export default function Home() {
             </CardTitle>
           </CardHeader>
           <CardContent className="px-3 pb-2">
-            {/* Google Drive Import Button - Above Upload Zone */}
-            <button
-              className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/50 hover:bg-muted transition-colors text-xs text-muted-foreground hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleGoogleDriveConnect();
-              }}
-              disabled={isLoadingGoogleDrive}
-            >
-              {isLoadingGoogleDrive ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
+            {/* Google Drive Import Buttons */}
+            <div className="flex items-center gap-2 mb-2">
+              {/* Original Google Drive button */}
+              <button
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted/50 hover:bg-muted transition-colors text-xs text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleGoogleDriveConnect();
+                }}
+                disabled={isLoadingGoogleDrive}
+              >
+                {isLoadingGoogleDrive ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <svg className="h-4 w-4" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066da"/>
+                    <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 47.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27z" fill="#00ac47"/>
+                    <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85L73.55 76.8z" fill="#ea4335"/>
+                    <path d="M43.65 25l13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832d"/>
+                    <path d="M59.85 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.5c1.6 0 3.15-.45 4.5-1.2L59.85 53z" fill="#2684fc"/>
+                    <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 28h27.45c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#ffba00"/>
+                  </svg>
+                )}
+                <span>Import from Google Drive</span>
+              </button>
+              
+              {/* NEW: Public folder button #2 */}
+              <button
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-green-100 hover:bg-green-200 transition-colors text-xs text-green-700 hover:text-green-800 border border-green-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowPublicFolderInput(!showPublicFolderInput);
+                }}
+              >
                 <svg className="h-4 w-4" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
                   <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066da"/>
                   <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 47.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27z" fill="#00ac47"/>
@@ -2080,9 +2400,41 @@ export default function Home() {
                   <path d="M59.85 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.5c1.6 0 3.15-.45 4.5-1.2L59.85 53z" fill="#2684fc"/>
                   <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 28h27.45c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#ffba00"/>
                 </svg>
-              )}
-              <span>Import from Google Drive</span>
-            </button>
+                <span>#2 Public Folder</span>
+              </button>
+            </div>
+            
+            {/* Public folder URL input */}
+            {showPublicFolderInput && (
+              <div className="mb-2 p-3 bg-green-50 border border-green-200 rounded-lg space-y-2">
+                <p className="text-xs text-green-700">Paste your public Google Drive folder URL:</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={publicFolderUrl}
+                    onChange={(e) => setPublicFolderUrl(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    className="flex-1 px-2 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePublicFolderImport();
+                    }}
+                    disabled={isLoadingPublicFolder || !publicFolderUrl}
+                    className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    {isLoadingPublicFolder ? (
+                      <><Loader2 className="h-3 w-3 animate-spin" /> Loading...</>
+                    ) : (
+                      'Import'
+                    )}
+                  </button>
+                </div>
+                <p className="text-[10px] text-green-600">Make sure the folder is shared as "Anyone with the link can view"</p>
+              </div>
+            )}
 
             {/* Upload Zone - Full Width */}
             <div
@@ -2158,7 +2510,7 @@ export default function Home() {
                           </div>
                           <div className="flex gap-1">
                             {media.map((m) => (
-                              <div key={m.id} className="relative group w-12 h-12 rounded overflow-hidden bg-muted flex-shrink-0">
+                              <div key={m.id} className={`relative group rounded overflow-hidden bg-muted flex-shrink-0 ${m.type === 'video' ? 'w-8 h-14' : 'w-12 h-12'}`}>
                                 {m.type === "image" ? (
                                   <img src={m.preview || m.thumbnail || m.googleDriveThumbnail || ''} alt="" className="w-full h-full object-cover" />
                                 ) : (
@@ -2307,17 +2659,19 @@ export default function Home() {
                 Distribute
               </Button>
             </div>
-            {/* Ad Name Composer - only for images */}
-            <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
-              <Label className="text-xs whitespace-nowrap">Ad Name Composer (images only):</Label>
-              <Input
-                value={adNameComposer}
-                onChange={(e) => setAdNameComposer(e.target.value.toUpperCase())}
-                placeholder="$IMAGE-NAME"
-                className="h-7 text-xs font-mono flex-1 max-w-[300px]"
-              />
-              <span className="text-[10px] text-muted-foreground">Use $IMAGE-NAME as placeholder. Hook will be appended automatically.</span>
-            </div>
+            {/* Ad Name Composer - only for images, hide when only videos */}
+            {mediaPool.some(m => m.type === 'image') && (
+              <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
+                <Label className="text-xs whitespace-nowrap">Ad Name Composer (images only):</Label>
+                <Input
+                  value={adNameComposer}
+                  onChange={(e) => setAdNameComposer(e.target.value.toUpperCase())}
+                  placeholder="$IMAGE-NAME"
+                  className="h-7 text-xs font-mono flex-1 max-w-[300px]"
+                />
+                <span className="text-[10px] text-muted-foreground">Use $IMAGE-NAME as placeholder. Hook will be appended automatically.</span>
+              </div>
+            )}
           </CardContent>
         </Card>
         )}

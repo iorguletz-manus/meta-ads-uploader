@@ -512,3 +512,17 @@
 - [x] Șterge permisiunea publică după upload (cleanup automat)
 - [x] Fișierele rămân private în Google Drive - doar temporar publice pentru upload
 
+
+
+## Bug Fix - Round 30
+
+### Video Upload via Bunny (Large Files)
+- [x] Implement direct browser-to-Bunny upload for large videos (>50MB)
+- [x] Meta receives file_url from Bunny CDN
+- [x] Video 112MB uploaded successfully
+
+### UI Improvements
+- [x] Video thumbnail display 9x16 (vertical) instead of square
+- [x] Hide AdName Composer when only videos in media pool
+- [x] Auto-generate AdSet Name from video pattern (T4_C1_E1_AD2_HOOK1_EVA_1 → T4_C1_E1_AD2_EVA_1_HOOK1-3)
+

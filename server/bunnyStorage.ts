@@ -60,7 +60,73 @@ export async function uploadToBunny(
         AccessKey: BUNNY_STORAGE_API_KEY,
         "Content-Type": contentType,
       },
-      body: buffer,
+      body: new Uint8Array(buffer),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[Bunny] Upload failed:", response.status, errorText);
+      return {
+        success: false,
+        error: `Upload failed: ${response.status} ${errorText}`,
+      };
+    }
+
+    const cdnUrl = `${BUNNY_CDN_URL}/${filePath}`;
+    console.log(`[Bunny] Uploaded successfully: ${cdnUrl}`);
+
+    return {
+      success: true,
+      cdnUrl,
+      path: filePath,
+    };
+  } catch (error) {
+    console.error("[Bunny] Upload error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
+ * Upload a file to Bunny.net Storage from raw buffer (for large files)
+ * @param fileName - Name of the file
+ * @param buffer - Raw file buffer
+ * @param contentType - MIME type of the file
+ * @param username - Username for folder organization
+ */
+export async function uploadBufferToBunny(
+  fileName: string,
+  buffer: Buffer,
+  contentType: string = "video/mp4",
+  username: string = "default"
+): Promise<BunnyUploadResult> {
+  try {
+    // Create folder structure: app/username/year/month/day/filename-timestamp.ext
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const timestamp = Date.now();
+    
+    // Put timestamp at the end, before extension
+    const lastDotIndex = fileName.lastIndexOf('.');
+    const nameWithoutExt = lastDotIndex > 0 ? fileName.substring(0, lastDotIndex) : fileName;
+    const ext = lastDotIndex > 0 ? fileName.substring(lastDotIndex) : '';
+    const uniqueFileName = `${nameWithoutExt}-${timestamp}${ext}`;
+    const filePath = `${APP_FOLDER}/${username}/${year}/${month}/${day}/${uniqueFileName}`;
+
+    console.log(`[Bunny] Uploading buffer: ${fileName} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+
+    // Upload to Bunny.net
+    const response = await fetch(`${BUNNY_STORAGE_URL}/${filePath}`, {
+      method: "PUT",
+      headers: {
+        AccessKey: BUNNY_STORAGE_API_KEY,
+        "Content-Type": contentType,
+      },
+      body: new Uint8Array(buffer),
     });
 
     if (!response.ok) {

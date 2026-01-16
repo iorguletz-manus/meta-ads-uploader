@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings, saveGoogleToken, getGoogleToken, clearGoogleToken, refreshGoogleAccessToken } from "./db";
-import { uploadToBunny, deleteFromBunny } from "./bunnyStorage";
+import { uploadToBunny, deleteFromBunny, uploadBufferToBunny } from "./bunnyStorage";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -492,6 +492,127 @@ export const appRouter = router({
           console.error("=".repeat(80) + "\n");
           throw new Error(error.message || "Failed to upload from Google Drive to Meta");
         }
+      }),
+
+    // Upload from public URL directly to Meta (for public Google Drive folders)
+    uploadFromPublicUrl: protectedProcedure
+      .input(z.object({
+        accessToken: z.string(),
+        adAccountId: z.string(),
+        fileUrl: z.string(),
+        fileName: z.string(),
+        isVideo: z.boolean(),
+      }))
+      .mutation(async ({ input }) => {
+        const startTime = Date.now();
+        console.log("\n" + "=".repeat(80));
+        console.log("[uploadFromPublicUrl] ====== START ======");
+        console.log("[uploadFromPublicUrl] File:", input.fileName);
+        console.log("[uploadFromPublicUrl] URL:", input.fileUrl);
+        console.log("[uploadFromPublicUrl] Is video:", input.isVideo);
+        
+        try {
+          const adAccountId = input.adAccountId.replace('act_', '');
+          
+          if (input.isVideo) {
+            // Upload video using file_url parameter
+            console.log("[uploadFromPublicUrl] Uploading video via file_url...");
+            
+            const formData = new FormData();
+            formData.append('access_token', input.accessToken);
+            formData.append('file_url', input.fileUrl);
+            formData.append('title', input.fileName);
+            
+            const uploadResponse = await fetch(
+              `${META_API_BASE}/act_${adAccountId}/advideos`,
+              {
+                method: 'POST',
+                body: formData,
+              }
+            );
+            
+            const data = await uploadResponse.json();
+            const totalTime = Date.now() - startTime;
+            
+            if (data.error) {
+              console.error("[uploadFromPublicUrl] Meta API error:", data.error);
+              throw new Error(data.error.message || "Failed to upload video to Meta");
+            }
+            
+            console.log("[uploadFromPublicUrl] ====== SUCCESS ======");
+            console.log("[uploadFromPublicUrl] Video ID:", data.id);
+            console.log("[uploadFromPublicUrl] Total time:", totalTime, "ms");
+            console.log("=".repeat(80) + "\n");
+            
+            return {
+              success: true,
+              videoId: data.id,
+              fileName: input.fileName,
+              type: "video" as const
+            };
+          } else {
+            // Upload image using url parameter
+            console.log("[uploadFromPublicUrl] Uploading image via url...");
+            
+            const formData = new FormData();
+            formData.append('access_token', input.accessToken);
+            formData.append('url', input.fileUrl);
+            
+            const uploadResponse = await fetch(
+              `${META_API_BASE}/act_${adAccountId}/adimages`,
+              {
+                method: 'POST',
+                body: formData,
+              }
+            );
+            
+            const data = await uploadResponse.json();
+            const totalTime = Date.now() - startTime;
+            
+            if (data.error) {
+              console.error("[uploadFromPublicUrl] Meta API error:", data.error);
+              throw new Error(data.error.message || "Failed to upload image to Meta");
+            }
+            
+            const images = data.images || {};
+            const imageKey = Object.keys(images)[0];
+            const imageHash = images[imageKey]?.hash;
+            
+            console.log("[uploadFromPublicUrl] ====== SUCCESS ======");
+            console.log("[uploadFromPublicUrl] Image hash:", imageHash);
+            console.log("[uploadFromPublicUrl] Total time:", totalTime, "ms");
+            console.log("=".repeat(80) + "\n");
+            
+            return {
+              success: true,
+              hash: imageHash,
+              fileName: input.fileName,
+              type: "image" as const
+            };
+          }
+        } catch (error: any) {
+          const totalTime = Date.now() - startTime;
+          console.error("[uploadFromPublicUrl] ====== FAILED ======");
+          console.error("[uploadFromPublicUrl] Error:", error.message);
+          console.error("[uploadFromPublicUrl] Total time:", totalTime, "ms");
+          console.error("=".repeat(80) + "\n");
+          throw new Error(error.message || "Failed to upload from public URL to Meta");
+        }
+      }),
+
+    // Upload large video via Bunny CDN then to Meta using file_url
+    uploadLargeVideoViaBunny: protectedProcedure
+      .input(z.object({
+        accessToken: z.string(),
+        adAccountId: z.string(),
+        fileName: z.string(),
+        // Video will be uploaded via multipart form, not base64
+      }))
+      .mutation(async ({ input }) => {
+        // This endpoint is just a placeholder - actual upload happens via separate multipart endpoint
+        // The flow is: Frontend uploads to /api/upload-video -> Bunny -> Meta file_url
+        console.log("[uploadLargeVideoViaBunny] Called for:", input.fileName);
+        return { success: true, message: "Use /api/upload-video endpoint for large files" };
       }),
 
     // Get ad accounts for the user
@@ -1694,14 +1815,27 @@ export const appRouter = router({
         redirectUri: z.string(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (!ctx.user) throw new Error("Not authenticated");
+        console.log("[exchangeCode] ====== START ======");
+        console.log("[exchangeCode] redirectUri:", input.redirectUri);
+        console.log("[exchangeCode] code length:", input.code?.length);
+        
+        if (!ctx.user) {
+          console.error("[exchangeCode] ERROR: Not authenticated");
+          throw new Error("Not authenticated");
+        }
         
         const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
         const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
         
+        console.log("[exchangeCode] clientId exists:", !!clientId);
+        console.log("[exchangeCode] clientSecret exists:", !!clientSecret);
+        
         if (!clientId || !clientSecret) {
+          console.error("[exchangeCode] ERROR: Google credentials not configured");
           throw new Error("Google credentials not configured");
         }
+        
+        console.log("[exchangeCode] Calling Google token endpoint...");
         
         // Exchange code for tokens
         const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -1720,9 +1854,17 @@ export const appRouter = router({
         
         const data = await response.json();
         
+        console.log("[exchangeCode] Google response status:", response.status);
+        console.log("[exchangeCode] Google response data:", JSON.stringify(data, null, 2));
+        
         if (data.error) {
+          console.error("[exchangeCode] ERROR from Google:", data.error, data.error_description);
           throw new Error(data.error_description || data.error);
         }
+        
+        console.log("[exchangeCode] Got access_token:", !!data.access_token);
+        console.log("[exchangeCode] Got refresh_token:", !!data.refresh_token);
+        console.log("[exchangeCode] Saving tokens to DB...");
         
         // Save tokens to DB
         await saveGoogleToken(
