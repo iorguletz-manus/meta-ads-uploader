@@ -330,87 +330,79 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const startTime = Date.now();
         console.log("\n" + "=".repeat(80));
-        console.log("[uploadFromGoogleDrive] ====== START ======");
+        console.log("[uploadFromGoogleDrive] ====== START (file_url method) ======");
         console.log("[uploadFromGoogleDrive] Timestamp:", new Date().toISOString());
         console.log("[uploadFromGoogleDrive] File:", input.fileName);
         console.log("[uploadFromGoogleDrive] MimeType:", input.mimeType);
         console.log("[uploadFromGoogleDrive] FileId:", input.fileId);
         console.log("[uploadFromGoogleDrive] AdAccountId:", input.adAccountId);
-        console.log("[uploadFromGoogleDrive] Google Token length:", input.googleAccessToken?.length || 0);
-        console.log("[uploadFromGoogleDrive] Meta Token length:", input.accessToken?.length || 0);
+        
+        const isVideo = input.mimeType.startsWith("video/");
+        let permissionId: string | null = null;
         
         try {
-          // Download file from Google Drive with AbortController for timeout
-          console.log("[uploadFromGoogleDrive] Step 1: Downloading from Google Drive...");
-          const downloadStartTime = Date.now();
+          // Step 1: Make file temporarily public
+          console.log("[uploadFromGoogleDrive] Step 1: Making file temporarily public...");
           
-          // Create AbortController with 5 minute timeout for large videos
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 minutes
-          
-          const driveResponse = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${input.fileId}?alt=media`,
+          const permissionResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${input.fileId}/permissions`,
             {
+              method: "POST",
               headers: {
                 Authorization: `Bearer ${input.googleAccessToken}`,
+                "Content-Type": "application/json",
               },
-              signal: controller.signal,
+              body: JSON.stringify({
+                role: "reader",
+                type: "anyone",
+              }),
             }
           );
           
-          clearTimeout(timeoutId);
-          
-          if (!driveResponse.ok) {
-            const errorText = await driveResponse.text();
-            console.error("[uploadFromGoogleDrive] Google Drive download failed:", driveResponse.status, errorText);
-            throw new Error(`Failed to download from Google Drive: ${driveResponse.status} - ${errorText}`);
+          if (!permissionResponse.ok) {
+            const errorText = await permissionResponse.text();
+            console.error("[uploadFromGoogleDrive] Failed to create public permission:", errorText);
+            throw new Error(`Failed to make file public: ${permissionResponse.status}`);
           }
           
-          const fileBuffer = await driveResponse.arrayBuffer();
-          const blob = new Blob([fileBuffer], { type: input.mimeType });
-          const downloadTime = Date.now() - downloadStartTime;
+          const permissionData = await permissionResponse.json();
+          permissionId = permissionData.id;
+          console.log("[uploadFromGoogleDrive] - Permission created, ID:", permissionId);
           
-          console.log("[uploadFromGoogleDrive] Step 2: Downloaded from Drive");
-          console.log("[uploadFromGoogleDrive] - Size:", fileBuffer.byteLength, "bytes (", Math.round(fileBuffer.byteLength / 1024 / 1024), "MB)");
-          console.log("[uploadFromGoogleDrive] - Download time:", downloadTime, "ms (", Math.round(downloadTime / 1000), "s)");
+          // Step 2: Get the public download URL
+          // Google Drive direct download URL format
+          const publicUrl = `https://drive.google.com/uc?export=download&id=${input.fileId}`;
+          console.log("[uploadFromGoogleDrive] Step 2: Public URL generated:", publicUrl);
           
-          // Determine if image or video
-          const isVideo = input.mimeType.startsWith("video/");
+          // Step 3: Upload to Meta using file_url
           const endpoint = isVideo 
             ? `${META_API_BASE}/${input.adAccountId}/advideos`
             : `${META_API_BASE}/${input.adAccountId}/adimages`;
           
-          console.log("[uploadFromGoogleDrive] Step 3: Uploading to Meta");
+          console.log("[uploadFromGoogleDrive] Step 3: Uploading to Meta via file_url");
           console.log("[uploadFromGoogleDrive] - Type:", isVideo ? "VIDEO" : "IMAGE");
           console.log("[uploadFromGoogleDrive] - Endpoint:", endpoint);
           
-          // Create form data
-          const formData = new FormData();
+          const uploadStartTime = Date.now();
+          
+          // Use URLSearchParams for form data
+          const formData = new URLSearchParams();
+          formData.append("access_token", input.accessToken);
+          formData.append("file_url", publicUrl);
           if (isVideo) {
             formData.append("title", input.fileName);
           } else {
-            formData.append("filename", input.fileName);
+            formData.append("name", input.fileName);
           }
-          formData.append("source", blob, input.fileName);
-          formData.append("access_token", input.accessToken);
-          
-          // Upload to Meta with timeout
-          console.log("[uploadFromGoogleDrive] Sending POST request to Meta...");
-          const uploadStartTime = Date.now();
-          
-          // Create AbortController with 10 minute timeout for large video uploads
-          const uploadController = new AbortController();
-          const uploadTimeoutId = setTimeout(() => uploadController.abort(), 10 * 60 * 1000); // 10 minutes
           
           const metaResponse = await fetch(endpoint, {
             method: "POST",
-            body: formData,
-            signal: uploadController.signal,
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: formData.toString(),
           });
           
-          clearTimeout(uploadTimeoutId);
           const uploadTime = Date.now() - uploadStartTime;
-          console.log("[uploadFromGoogleDrive] - Upload time:", uploadTime, "ms (", Math.round(uploadTime / 1000), "s)");
+          console.log("[uploadFromGoogleDrive] - Meta response time:", uploadTime, "ms");
           
           const data = await metaResponse.json();
           
@@ -419,17 +411,31 @@ export const appRouter = router({
           console.log("[uploadFromGoogleDrive] - Response:", JSON.stringify(data, null, 2));
           
           if (data.error) {
-            console.error("[uploadFromGoogleDrive] ====== ERROR ======");
-            console.error("[uploadFromGoogleDrive] Error code:", data.error.code);
-            console.error("[uploadFromGoogleDrive] Error type:", data.error.type);
-            console.error("[uploadFromGoogleDrive] Error message:", data.error.message);
-            console.error("[uploadFromGoogleDrive] Error subcode:", data.error.error_subcode);
-            console.error("[uploadFromGoogleDrive] Error user msg:", data.error.error_user_msg);
-            console.error("[uploadFromGoogleDrive] FBTrace ID:", data.error.fbtrace_id);
-            throw new Error(data.error.message || "Failed to upload to Meta");
+            console.error("[uploadFromGoogleDrive] Meta API Error:", data.error.message);
+            throw new Error(data.error.error_user_msg || data.error.message || "Failed to upload to Meta");
           }
           
           const totalTime = Date.now() - startTime;
+          
+          // Step 5: Remove public permission (cleanup)
+          console.log("[uploadFromGoogleDrive] Step 5: Removing public permission...");
+          if (permissionId) {
+            try {
+              await fetch(
+                `https://www.googleapis.com/drive/v3/files/${input.fileId}/permissions/${permissionId}`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    Authorization: `Bearer ${input.googleAccessToken}`,
+                  },
+                }
+              );
+              console.log("[uploadFromGoogleDrive] - Permission removed successfully");
+              permissionId = null; // Mark as cleaned up
+            } catch (cleanupError) {
+              console.warn("[uploadFromGoogleDrive] - Failed to remove permission (non-critical):", cleanupError);
+            }
+          }
           
           if (isVideo) {
             console.log("[uploadFromGoogleDrive] ====== SUCCESS ======");
@@ -462,7 +468,27 @@ export const appRouter = router({
           const totalTime = Date.now() - startTime;
           console.error("[uploadFromGoogleDrive] ====== FAILED ======");
           console.error("[uploadFromGoogleDrive] Error:", error.message);
-          console.error("[uploadFromGoogleDrive] Total time before failure:", totalTime, "ms (", Math.round(totalTime / 1000), "s)");
+          console.error("[uploadFromGoogleDrive] Total time before failure:", totalTime, "ms");
+          
+          // Cleanup: try to remove public permission even on error
+          if (permissionId) {
+            try {
+              console.log("[uploadFromGoogleDrive] Cleanup: Removing public permission after error...");
+              await fetch(
+                `https://www.googleapis.com/drive/v3/files/${input.fileId}/permissions/${permissionId}`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    Authorization: `Bearer ${input.googleAccessToken}`,
+                  },
+                }
+              );
+              console.log("[uploadFromGoogleDrive] - Permission removed");
+            } catch (cleanupError) {
+              console.warn("[uploadFromGoogleDrive] - Failed to remove permission during cleanup");
+            }
+          }
+          
           console.error("=".repeat(80) + "\n");
           throw new Error(error.message || "Failed to upload from Google Drive to Meta");
         }

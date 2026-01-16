@@ -502,3 +502,13 @@
 - [x] Adăugat mai multe pattern-uri pentru detectare din filename (vertical, story, reel, feed, etc.)
 - [x] Default la 9x16 pentru video-uri fără aspect ratio detectat (cel mai comun pentru ads)
 
+
+## Bug Fix - Round 29
+
+### Upload Video via file_url (Major Fix)
+- [x] Implementat metoda file_url pentru upload video de pe Google Drive la Meta
+- [x] Serverul nu mai descarcă video-ul în memorie - Meta îl descarcă direct
+- [x] Adăugat permisiune publică temporară la fișier (automat prin API)
+- [x] Șterge permisiunea publică după upload (cleanup automat)
+- [x] Fișierele rămân private în Google Drive - doar temporar publice pentru upload
+
