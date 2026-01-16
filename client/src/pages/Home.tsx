@@ -660,6 +660,12 @@ export default function Home() {
   const [showPublicFolderInput, setShowPublicFolderInput] = useState(false);
   const [publicFolderUrl, setPublicFolderUrl] = useState('');
   const [isLoadingPublicFolder, setIsLoadingPublicFolder] = useState(false);
+  
+  // Google Drive #3 - Public links method (direct file links)
+  const [showPublicLinksInput, setShowPublicLinksInput] = useState(false);
+  const [publicLinksText, setPublicLinksText] = useState('');
+  const [isLoadingPublicLinks, setIsLoadingPublicLinks] = useState(false);
+  const [publicLinksProgress, setPublicLinksProgress] = useState<{current: number, total: number, fileName: string} | null>(null);
 
   // Google Drive Connect - opens picker
   // Exchange Google auth code mutation
@@ -1107,6 +1113,86 @@ export default function Home() {
     }
     
     console.log("[PublicFolder] ====== END ======");
+  };
+
+  // Handle public links import (#3) - server-to-server download
+  const handlePublicLinksImport = async () => {
+    const links = publicLinksText
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0 && l.includes('drive.google.com'));
+    
+    if (links.length === 0) {
+      toast.error("No valid Google Drive links found");
+      return;
+    }
+    
+    console.log("[PublicLinks] ====== START ======");
+    console.log("[PublicLinks] Total links:", links.length);
+    
+    setIsLoadingPublicLinks(true);
+    setPublicLinksProgress({ current: 0, total: links.length, fileName: 'Starting...' });
+    
+    try {
+      // Call backend to download and upload files
+      const result = await (trpc as any).google.downloadPublicFiles.mutate({ links });
+      
+      console.log("[PublicLinks] Backend result:", result);
+      
+      if (!result.results || result.results.length === 0) {
+        toast.error("No files were processed");
+        return;
+      }
+      
+      // Add successful files to media pool
+      const successfulFiles = result.results.filter((r: any) => r.success);
+      const failedFiles = result.results.filter((r: any) => !r.success);
+      
+      if (successfulFiles.length > 0) {
+        const newMedia: MediaFile[] = successfulFiles.map((file: any) => ({
+          id: `bunny_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: file.fileName,
+          base64: '',
+          aspectRatio: file.fileType === 'video' ? '9x16' : '1x1', // Default, will be detected on upload
+          type: file.fileType as 'video' | 'image',
+          cdnUrl: file.bunnyUrl,
+          bunnyPath: file.bunnyPath,
+          preview: file.bunnyUrl,
+          thumbnail: file.bunnyUrl,
+          uploadStatus: 'success' as const, // Already uploaded to Bunny
+        }));
+        
+        setMediaPool(prev => {
+          const updated = [...prev, ...newMedia];
+          const toSave = updated.map(m => ({
+            ...m,
+            base64: ''
+          }));
+          localStorage.setItem(LS_KEYS.MEDIA_POOL, JSON.stringify(toSave));
+          return updated;
+        });
+        
+        toast.success(`Downloaded ${successfulFiles.length} file(s) from Google Drive!`);
+      }
+      
+      if (failedFiles.length > 0) {
+        console.error("[PublicLinks] Failed files:", failedFiles);
+        toast.error(`${failedFiles.length} file(s) failed to download`);
+      }
+      
+      // Clear input and close
+      setPublicLinksText('');
+      setShowPublicLinksInput(false);
+      
+    } catch (error: any) {
+      console.error("[PublicLinks] Error:", error);
+      toast.error(error.message || "Failed to download files");
+    } finally {
+      setIsLoadingPublicLinks(false);
+      setPublicLinksProgress(null);
+    }
+    
+    console.log("[PublicLinks] ====== END ======");
   };
 
   // Compress image to reduce size
@@ -2511,6 +2597,25 @@ export default function Home() {
                 </svg>
                 <span>#2 Public Folder</span>
               </button>
+              
+              {/* NEW: Public Links button #3 */}
+              <button
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-blue-100 hover:bg-blue-200 transition-colors text-xs text-blue-700 hover:text-blue-800 border border-blue-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowPublicLinksInput(!showPublicLinksInput);
+                }}
+              >
+                <svg className="h-4 w-4" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066da"/>
+                  <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 47.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27z" fill="#00ac47"/>
+                  <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85L73.55 76.8z" fill="#ea4335"/>
+                  <path d="M43.65 25l13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832d"/>
+                  <path d="M59.85 53H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.5c1.6 0 3.15-.45 4.5-1.2L59.85 53z" fill="#2684fc"/>
+                  <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 28h27.45c0-1.55-.4-3.1-1.2-4.5l-12.7-22z" fill="#ffba00"/>
+                </svg>
+                <span>#3 Public Links</span>
+              </button>
             </div>
             
             {/* Public folder URL input */}
@@ -2542,6 +2647,63 @@ export default function Home() {
                   </button>
                 </div>
                 <p className="text-[10px] text-green-600">Make sure the folder is shared as "Anyone with the link can view"</p>
+              </div>
+            )}
+            
+            {/* Public Links input #3 */}
+            {showPublicLinksInput && (
+              <div className="mb-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                <p className="text-xs text-blue-700 font-medium">Paste Google Drive file links (one per line or comma-separated):</p>
+                <textarea
+                  value={publicLinksText}
+                  onChange={(e) => {
+                    // Auto-arrange: replace commas with newlines
+                    const text = e.target.value;
+                    const arranged = text.includes(',') && !text.includes('\n') 
+                      ? text.split(',').map(s => s.trim()).filter(s => s).join('\n')
+                      : text;
+                    setPublicLinksText(arranged);
+                  }}
+                  placeholder="https://drive.google.com/file/d/FILE_ID_1/view\nhttps://drive.google.com/file/d/FILE_ID_2/view\n..."
+                  className="w-full px-2 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono h-32 resize-none"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] text-blue-600">
+                    {publicLinksText.split('\n').filter(l => l.trim()).length} links detected
+                    {publicLinksProgress && (
+                      <span className="ml-2 text-blue-800 font-medium">
+                        • Downloading {publicLinksProgress.current}/{publicLinksProgress.total}: {publicLinksProgress.fileName}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPublicLinksText('');
+                      }}
+                      className="px-2 py-1 text-blue-600 text-xs rounded-md hover:bg-blue-100"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePublicLinksImport();
+                      }}
+                      disabled={isLoadingPublicLinks || !publicLinksText.trim()}
+                      className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      {isLoadingPublicLinks ? (
+                        <><Loader2 className="h-3 w-3 animate-spin" /> Downloading...</>
+                      ) : (
+                        'Download & Import'
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-blue-600">Files must be publicly accessible ("Anyone with the link can view"). Server will download directly to Bunny CDN.</p>
               </div>
             )}
 

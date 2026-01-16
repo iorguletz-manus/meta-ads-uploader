@@ -397,6 +397,94 @@ export const appRouter = router({
         }
       }),
 
+    // Download from public Google Drive and upload to Bunny CDN
+    importFromPublicGoogleDrive: protectedProcedure
+      .input(z.object({
+        fileId: z.string(),
+        bunnyStorageZone: z.string(),
+        bunnyApiKey: z.string(),
+        bunnyPullZone: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        console.log("\n" + "=".repeat(80));
+        console.log("[importFromPublicGoogleDrive] ====== START ======");
+        console.log("[importFromPublicGoogleDrive] FileId:", input.fileId);
+        
+        try {
+          // Step 1: Get file metadata from Google Drive
+          const metadataUrl = `https://www.googleapis.com/drive/v3/files/${input.fileId}?fields=name,mimeType,size&key=${process.env.VITE_GOOGLE_API_KEY}`;
+          console.log("[importFromPublicGoogleDrive] Step 1: Getting metadata...");
+          
+          const metadataResponse = await fetch(metadataUrl);
+          if (!metadataResponse.ok) {
+            const errorText = await metadataResponse.text();
+            console.error("[importFromPublicGoogleDrive] Metadata error:", errorText);
+            throw new Error(`Failed to get file metadata: ${metadataResponse.status}. Make sure the file is publicly shared.`);
+          }
+          
+          const metadata = await metadataResponse.json();
+          console.log("[importFromPublicGoogleDrive] Metadata:", metadata);
+          
+          // Step 2: Download file content from Google Drive
+          const downloadUrl = `https://www.googleapis.com/drive/v3/files/${input.fileId}?alt=media&key=${process.env.VITE_GOOGLE_API_KEY}`;
+          console.log("[importFromPublicGoogleDrive] Step 2: Downloading from Google Drive...");
+          
+          const downloadResponse = await fetch(downloadUrl);
+          if (!downloadResponse.ok) {
+            throw new Error(`Failed to download file: ${downloadResponse.status}`);
+          }
+          
+          const arrayBuffer = await downloadResponse.arrayBuffer();
+          const fileBuffer = Buffer.from(arrayBuffer);
+          console.log("[importFromPublicGoogleDrive] Downloaded:", fileBuffer.length, "bytes");
+          
+          // Step 3: Generate unique filename for Bunny
+          const timestamp = Date.now();
+          const randomSuffix = Math.random().toString(36).substring(2, 8);
+          const extension = metadata.name.split('.').pop() || 'mp4';
+          const bunnyFileName = `gdrive_${timestamp}_${randomSuffix}.${extension}`;
+          
+          // Step 4: Upload to Bunny CDN
+          console.log("[importFromPublicGoogleDrive] Step 3: Uploading to Bunny CDN...");
+          const bunnyUploadUrl = `https://storage.bunnycdn.com/${input.bunnyStorageZone}/${bunnyFileName}`;
+          
+          const bunnyResponse = await fetch(bunnyUploadUrl, {
+            method: 'PUT',
+            headers: {
+              'AccessKey': input.bunnyApiKey,
+              'Content-Type': metadata.mimeType,
+            },
+            body: fileBuffer,
+          });
+          
+          if (!bunnyResponse.ok) {
+            const errorText = await bunnyResponse.text();
+            console.error("[importFromPublicGoogleDrive] Bunny error:", errorText);
+            throw new Error(`Failed to upload to Bunny: ${bunnyResponse.status}`);
+          }
+          
+          const bunnyUrl = `https://${input.bunnyPullZone}.b-cdn.net/${bunnyFileName}`;
+          
+          console.log("[importFromPublicGoogleDrive] ====== SUCCESS ======");
+          console.log("[importFromPublicGoogleDrive] Bunny URL:", bunnyUrl);
+          console.log("=".repeat(80) + "\n");
+          
+          return {
+            success: true,
+            fileName: metadata.name,
+            mimeType: metadata.mimeType,
+            size: fileBuffer.length,
+            bunnyUrl,
+            bunnyFileName,
+          };
+        } catch (error: any) {
+          console.error("[importFromPublicGoogleDrive] ====== FAILED ======");
+          console.error("[importFromPublicGoogleDrive] Error:", error.message);
+          console.log("=".repeat(80) + "\n");
+          throw new Error(error.message || "Failed to import from Google Drive");
+        }
+      }),
+
     // Upload from Google Drive URL directly to Meta (server-side)
     uploadFromGoogleDriveToMeta: protectedProcedure
       .input(z.object({
@@ -2074,6 +2162,159 @@ export const appRouter = router({
       await clearGoogleToken(ctx.user.openId);
       return { success: true };
     }),
+
+    // Download files from public Google Drive links and upload to Bunny CDN
+    downloadPublicFiles: protectedProcedure
+      .input(z.object({
+        links: z.array(z.string()),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        console.log("[downloadPublicFiles] ====== START ======");
+        console.log("[downloadPublicFiles] Total links:", input.links.length);
+        
+        if (!ctx.user) {
+          throw new Error("Not authenticated");
+        }
+        
+        const results: Array<{
+          success: boolean;
+          fileName: string;
+          bunnyUrl?: string;
+          bunnyPath?: string;
+          fileType: 'video' | 'image';
+          error?: string;
+        }> = [];
+        
+        const GOOGLE_API_KEY = process.env.VITE_GOOGLE_API_KEY;
+        
+        for (let i = 0; i < input.links.length; i++) {
+          const link = input.links[i].trim();
+          console.log(`[downloadPublicFiles] Processing ${i + 1}/${input.links.length}: ${link}`);
+          
+          try {
+            // Extract file ID from various Google Drive URL formats
+            // Format 1: https://drive.google.com/file/d/FILE_ID/view
+            // Format 2: https://drive.google.com/open?id=FILE_ID
+            // Format 3: https://drive.google.com/uc?id=FILE_ID
+            let fileId: string | null = null;
+            
+            const fileIdMatch = link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (fileIdMatch) {
+              fileId = fileIdMatch[1];
+            } else {
+              const idParamMatch = link.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+              if (idParamMatch) {
+                fileId = idParamMatch[1];
+              }
+            }
+            
+            if (!fileId) {
+              console.error(`[downloadPublicFiles] Could not extract file ID from: ${link}`);
+              results.push({
+                success: false,
+                fileName: 'unknown',
+                fileType: 'video',
+                error: 'Invalid Google Drive URL format',
+              });
+              continue;
+            }
+            
+            console.log(`[downloadPublicFiles] File ID: ${fileId}`);
+            
+            // Get file metadata from Google Drive API
+            const metadataUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?key=${GOOGLE_API_KEY}&fields=name,mimeType,size`;
+            const metadataResponse = await fetch(metadataUrl);
+            const metadata = await metadataResponse.json();
+            
+            if (metadata.error) {
+              console.error(`[downloadPublicFiles] Metadata error:`, metadata.error);
+              results.push({
+                success: false,
+                fileName: 'unknown',
+                fileType: 'video',
+                error: metadata.error.message || 'Failed to get file metadata',
+              });
+              continue;
+            }
+            
+            const fileName = metadata.name || `file_${fileId}`;
+            const mimeType = metadata.mimeType || 'application/octet-stream';
+            const isVideo = mimeType.startsWith('video/');
+            const fileType: 'video' | 'image' = isVideo ? 'video' : 'image';
+            
+            console.log(`[downloadPublicFiles] File: ${fileName}, Type: ${mimeType}, Size: ${metadata.size}`);
+            
+            // Download file from Google Drive
+            // Use the export download URL for public files
+            const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${GOOGLE_API_KEY}`;
+            
+            console.log(`[downloadPublicFiles] Downloading from Google Drive...`);
+            const downloadResponse = await fetch(downloadUrl);
+            
+            if (!downloadResponse.ok) {
+              const errorText = await downloadResponse.text();
+              console.error(`[downloadPublicFiles] Download failed: ${downloadResponse.status} ${errorText}`);
+              results.push({
+                success: false,
+                fileName,
+                fileType,
+                error: `Download failed: ${downloadResponse.status}`,
+              });
+              continue;
+            }
+            
+            // Get file as buffer
+            const arrayBuffer = await downloadResponse.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            
+            console.log(`[downloadPublicFiles] Downloaded ${(buffer.length / 1024 / 1024).toFixed(2)} MB`);
+            
+            // Upload to Bunny CDN
+            console.log(`[downloadPublicFiles] Uploading to Bunny CDN...`);
+            const bunnyResult = await uploadBufferToBunny(
+              fileName,
+              buffer,
+              mimeType,
+              ctx.user.openId
+            );
+            
+            if (!bunnyResult.success) {
+              console.error(`[downloadPublicFiles] Bunny upload failed:`, bunnyResult.error);
+              results.push({
+                success: false,
+                fileName,
+                fileType,
+                error: bunnyResult.error || 'Bunny upload failed',
+              });
+              continue;
+            }
+            
+            console.log(`[downloadPublicFiles] Uploaded to Bunny: ${bunnyResult.cdnUrl}`);
+            
+            results.push({
+              success: true,
+              fileName,
+              bunnyUrl: bunnyResult.cdnUrl,
+              bunnyPath: bunnyResult.path,
+              fileType,
+            });
+            
+          } catch (error: any) {
+            console.error(`[downloadPublicFiles] Error processing link:`, error);
+            results.push({
+              success: false,
+              fileName: 'unknown',
+              fileType: 'video',
+              error: error.message || 'Unknown error',
+            });
+          }
+        }
+        
+        console.log("[downloadPublicFiles] ====== COMPLETE ======");
+        console.log(`[downloadPublicFiles] Success: ${results.filter(r => r.success).length}/${results.length}`);
+        
+        return { results };
+      }),
 
     // Exchange authorization code for tokens (with refresh token)
     exchangeCode: protectedProcedure

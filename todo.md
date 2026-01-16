@@ -651,3 +651,22 @@
 - [x] Add degrees_of_freedom_spec with all features OPT_OUT to image creative (batchCreateAds)
 - [x] Add degrees_of_freedom_spec with all features OPT_OUT to createAd (multiple images)
 - [x] Add degrees_of_freedom_spec with all features OPT_OUT to createAd (single image)
+
+
+## Feature - Round 26: Public Links Import from Google Drive
+
+### Goal
+- Add "#3 Public Links" button to import files from Google Drive using direct links
+- User pastes multiple Google Drive links (comma or newline separated)
+- Server downloads files from Google Drive and uploads to Bunny CDN (server-to-server)
+
+### Tasks
+- [x] Add backend endpoint `google.downloadPublicFiles` to download files from Google Drive by file ID
+- [x] Backend extracts file IDs from various Google Drive URL formats
+- [x] Backend downloads files using Google Drive API with API key
+- [x] Backend uploads files to Bunny CDN using `uploadBufferToBunny`
+- [x] Add "#3 Public Links" button in Step 2 (blue color, next to #2 Public Folder)
+- [x] Add dialog with textarea for pasting links (auto-arranges comma-separated to newlines)
+- [x] Show link count and download progress
+- [x] Add downloaded files to media pool with Bunny CDN URLs
+- [x] Write vitest tests for the new endpoint (6 tests passing)
