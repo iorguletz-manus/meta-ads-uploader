@@ -443,6 +443,11 @@
 - [x] Thumbnail de la Google Drive API pentru preview
 
 
+## Google Drive UI - Round 25
+
+- [x] Shared Drives ca tab principal în Google Picker (primul view)
+
+
 ## Bug Fix - Round 22
 
 - [ ] Google Drive - salvare token în sesiune pentru a evita re-login la fiecare import

@@ -700,9 +700,10 @@ export default function Home() {
       .setEnableDrives(true)
       .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
     
+    // Build picker with Shared Drives as the first/default view
     const picker = new google.picker.PickerBuilder()
-      .addView(docsView)
-      .addView(sharedDriveView)
+      .addView(sharedDriveView) // Shared Drives first (default tab)
+      .addView(docsView) // My Drive second
       .setOAuthToken(accessToken)
       .setDeveloperKey(GOOGLE_API_KEY)
       .setCallback((data: any) => handlePickerCallback(data, accessToken))
