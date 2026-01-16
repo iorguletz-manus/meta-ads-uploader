@@ -1172,7 +1172,6 @@ export const appRouter = router({
             // Disable all Advantage+ creative enhancements
             degrees_of_freedom_spec: JSON.stringify({
               creative_features_spec: {
-                standard_enhancements: { enroll_status: "OPT_OUT" },
                 image_touchups: { enroll_status: "OPT_OUT" },
                 enhance_cta: { enroll_status: "OPT_OUT" },
                 cv_transformation: { enroll_status: "OPT_OUT" },
@@ -1199,7 +1198,6 @@ export const appRouter = router({
             // Disable all Advantage+ creative enhancements
             degrees_of_freedom_spec: JSON.stringify({
               creative_features_spec: {
-                standard_enhancements: { enroll_status: "OPT_OUT" },
                 image_touchups: { enroll_status: "OPT_OUT" },
                 enhance_cta: { enroll_status: "OPT_OUT" },
                 cv_transformation: { enroll_status: "OPT_OUT" },
@@ -1746,7 +1744,6 @@ export const appRouter = router({
                 // Disable all Advantage+ creative enhancements
                 degrees_of_freedom_spec: JSON.stringify({
                   creative_features_spec: {
-                    standard_enhancements: { enroll_status: "OPT_OUT" },
                     image_touchups: { enroll_status: "OPT_OUT" },
                     enhance_cta: { enroll_status: "OPT_OUT" },
                     cv_transformation: { enroll_status: "OPT_OUT" },
@@ -1785,7 +1782,6 @@ export const appRouter = router({
                 // Disable all Advantage+ creative enhancements
                 degrees_of_freedom_spec: JSON.stringify({
                   creative_features_spec: {
-                    standard_enhancements: { enroll_status: "OPT_OUT" },
                     image_touchups: { enroll_status: "OPT_OUT" },
                     enhance_cta: { enroll_status: "OPT_OUT" },
                     cv_transformation: { enroll_status: "OPT_OUT" },
