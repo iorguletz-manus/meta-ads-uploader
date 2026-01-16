@@ -958,8 +958,10 @@ export const appRouter = router({
           media: z.array(z.object({
             filename: z.string(),
             aspectRatio: z.string(),
-            base64: z.string(),
+            base64: z.string().optional(), // Optional - not needed if metaHash/metaVideoId provided
             type: z.enum(["image", "video"]),
+            metaHash: z.string().optional(), // Pre-uploaded image hash
+            metaVideoId: z.string().optional(), // Pre-uploaded video ID
           })),
         })),
       }))
@@ -1150,8 +1152,18 @@ export const appRouter = router({
               imageIndex++;
               console.log(`[STEP 4.${adIndex}a] Image ${imageIndex}/${images.length}: ${image.filename}`);
               
+              // If we already have a metaHash from pre-upload, use it directly
+              if (image.metaHash) {
+                console.log(`[STEP 4.${adIndex}a] Using pre-uploaded hash: ${image.metaHash}`);
+                uploadedImages.push({
+                  hash: image.metaHash,
+                  aspectRatio: image.aspectRatio,
+                });
+                continue;
+              }
+              
               if (!image.base64) {
-                console.log(`[STEP 4.${adIndex}a] SKIPPING - no base64 data for ${image.filename}`);
+                console.log(`[STEP 4.${adIndex}a] SKIPPING - no base64 data and no metaHash for ${image.filename}`);
                 continue;
               }
               
@@ -1221,8 +1233,18 @@ export const appRouter = router({
               videoIndex++;
               console.log(`[STEP 4.${adIndex}b] Video ${videoIndex}/${videos.length}: ${video.filename}`);
               
+              // If we already have a metaVideoId from pre-upload, use it directly
+              if (video.metaVideoId) {
+                console.log(`[STEP 4.${adIndex}b] Using pre-uploaded video ID: ${video.metaVideoId}`);
+                uploadedVideos.push({
+                  id: video.metaVideoId,
+                  aspectRatio: video.aspectRatio,
+                });
+                continue;
+              }
+              
               if (!video.base64) {
-                console.log(`[STEP 4.${adIndex}b] SKIPPING - no base64 data for ${video.filename}`);
+                console.log(`[STEP 4.${adIndex}b] SKIPPING - no base64 data and no metaVideoId for ${video.filename}`);
                 continue;
               }
               

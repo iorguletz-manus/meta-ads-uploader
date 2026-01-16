@@ -1492,6 +1492,8 @@ export default function Home() {
               base64: base64Data,
               type: m.type,
               aspectRatio: m.aspectRatio,
+              metaHash: m.metaHash, // Pre-uploaded image hash
+              metaVideoId: m.metaVideoId, // Pre-uploaded video ID
             };
           }));
 
@@ -1614,9 +1616,11 @@ export default function Home() {
           url: adSet.sharedUrl,
           media: ad.media.map((m) => ({
             filename: m.name,
-            base64: m.base64.split(",")[1] || m.base64,
+            base64: m.base64 ? (m.base64.split(",")[1] || m.base64) : "",
             type: m.type,
             aspectRatio: m.aspectRatio,
+            metaHash: m.metaHash, // Pre-uploaded image hash
+            metaVideoId: m.metaVideoId, // Pre-uploaded video ID
           })),
         };
       });

@@ -482,3 +482,10 @@
 - [x] Obținere thumbnail din Google Drive API metadata (thumbnailLink)
 - [x] Logging îmbunătățit pentru debugging thumbnail-uri
 
+
+### Video Upload Fix
+- [x] Fix upload video la Meta - folosește metaVideoId pre-uploadat în loc să re-uploadeze
+- [x] Actualizat schema batchCreateAds să accepte metaHash și metaVideoId opționale
+- [x] Backend verifică dacă există metaHash/metaVideoId înainte să încerce upload
+- [x] Frontend trimite metaHash și metaVideoId la batchCreateAds
+
