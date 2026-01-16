@@ -15,20 +15,74 @@ const FIXED_PASSWORD = "cinema10";
 // Meta API base URL
 const META_API_BASE = "https://graph.facebook.com/v24.0";
 
-// Helper to get video thumbnail URL from Meta
+// Helper to wait for video processing and get thumbnail URL from Meta
 async function getVideoThumbnailUrl(videoId: string, accessToken: string): Promise<string | null> {
+  const maxAttempts = 30; // Max 30 attempts (about 60 seconds)
+  const delayMs = 2000; // 2 seconds between attempts
+  
   try {
-    console.log(`[getVideoThumbnail] Fetching thumbnail for video ${videoId}...`);
-    const response = await fetch(
-      `${META_API_BASE}/${videoId}?fields=picture&access_token=${accessToken}`
-    );
-    const data = await response.json();
-    if (data.error) {
-      console.error(`[getVideoThumbnail] Error:`, data.error.message);
-      return null;
+    console.log(`[getVideoThumbnail] Waiting for video ${videoId} to be processed...`);
+    
+    // First, wait for video to be ready
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const statusResponse = await fetch(
+        `${META_API_BASE}/${videoId}?fields=status,picture,thumbnails&access_token=${accessToken}`
+      );
+      const statusData = await statusResponse.json();
+      
+      if (statusData.error) {
+        console.error(`[getVideoThumbnail] Error checking status:`, statusData.error.message);
+        return null;
+      }
+      
+      const status = statusData.status?.video_status || statusData.status;
+      console.log(`[getVideoThumbnail] Attempt ${attempt}/${maxAttempts} - Status: ${status}`);
+      
+      // Check if video is ready
+      if (status === 'ready' || status === 'complete') {
+        // Try to get best thumbnail
+        // First try thumbnails array for best quality
+        if (statusData.thumbnails?.data?.length > 0) {
+          // Get the largest thumbnail
+          const thumbnails = statusData.thumbnails.data;
+          const bestThumb = thumbnails.reduce((best: any, curr: any) => {
+            const bestSize = (best.width || 0) * (best.height || 0);
+            const currSize = (curr.width || 0) * (curr.height || 0);
+            return currSize > bestSize ? curr : best;
+          }, thumbnails[0]);
+          
+          if (bestThumb?.uri) {
+            console.log(`[getVideoThumbnail] Got high-quality thumbnail:`, bestThumb.uri);
+            return bestThumb.uri;
+          }
+        }
+        
+        // Fallback to picture field
+        if (statusData.picture) {
+          console.log(`[getVideoThumbnail] Got thumbnail URL:`, statusData.picture);
+          return statusData.picture;
+        }
+        
+        console.log(`[getVideoThumbnail] Video ready but no thumbnail found`);
+        return null;
+      }
+      
+      // If still processing, wait and retry
+      if (status === 'processing' || status === 'uploading' || !status) {
+        console.log(`[getVideoThumbnail] Video still processing, waiting ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue;
+      }
+      
+      // If error status, stop trying
+      if (status === 'error' || status === 'failed') {
+        console.error(`[getVideoThumbnail] Video processing failed with status: ${status}`);
+        return null;
+      }
     }
-    console.log(`[getVideoThumbnail] Got thumbnail URL:`, data.picture);
-    return data.picture || null;
+    
+    console.warn(`[getVideoThumbnail] Timeout waiting for video to be ready after ${maxAttempts} attempts`);
+    return null;
   } catch (error: any) {
     console.error(`[getVideoThumbnail] Failed:`, error.message);
     return null;
@@ -1065,6 +1119,16 @@ export const appRouter = router({
             name: `${input.adName}_creative`,
             object_story_spec: JSON.stringify(objectStorySpec),
             asset_feed_spec: JSON.stringify(assetFeedSpec),
+            // Disable Advantage+ creative enhancements
+            degrees_of_freedom_spec: JSON.stringify({
+              creative_features_spec: {
+                standard_enhancements: { enroll_status: "OPT_OUT" },
+              },
+            }),
+            // Disable Multi-advertiser ads
+            contextual_multi_ads: JSON.stringify({
+              enroll_status: "OPT_OUT",
+            }),
           };
         } else {
           // Single image - simple creative
@@ -1072,6 +1136,16 @@ export const appRouter = router({
           creativeData = {
             name: `${input.adName}_creative`,
             object_story_spec: JSON.stringify(objectStorySpec),
+            // Disable Advantage+ creative enhancements
+            degrees_of_freedom_spec: JSON.stringify({
+              creative_features_spec: {
+                standard_enhancements: { enroll_status: "OPT_OUT" },
+              },
+            }),
+            // Disable Multi-advertiser ads
+            contextual_multi_ads: JSON.stringify({
+              enroll_status: "OPT_OUT",
+            }),
           };
         }
         
@@ -1582,6 +1656,16 @@ export const appRouter = router({
                     ...thumbnailData,
                   },
                 }),
+                // Disable Advantage+ creative enhancements
+                degrees_of_freedom_spec: JSON.stringify({
+                  creative_features_spec: {
+                    standard_enhancements: { enroll_status: "OPT_OUT" },
+                  },
+                }),
+                // Disable Multi-advertiser ads
+                contextual_multi_ads: JSON.stringify({
+                  enroll_status: "OPT_OUT",
+                }),
               };
             } else {
               console.log(`[STEP 4.${adIndex}d] Creating IMAGE creative`);
@@ -1600,6 +1684,16 @@ export const appRouter = router({
                       value: { link: ad.url }
                     },
                   },
+                }),
+                // Disable Advantage+ creative enhancements
+                degrees_of_freedom_spec: JSON.stringify({
+                  creative_features_spec: {
+                    standard_enhancements: { enroll_status: "OPT_OUT" },
+                  },
+                }),
+                // Disable Multi-advertiser ads
+                contextual_multi_ads: JSON.stringify({
+                  enroll_status: "OPT_OUT",
                 }),
               };
             }

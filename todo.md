@@ -560,3 +560,12 @@
 - [x] Show upload percentage during browser-to-Bunny transfer
 - [x] Make uploads parallel (all videos upload simultaneously)
 - [x] Show individual progress bar for each media item in UI
+
+## Bug Fixes - Round 19
+
+### Meta Ad Settings
+- [x] Disable Advantage+ creative enhancements by default (degrees_of_freedom_spec with OPT_OUT)
+- [x] Disable Multi-advertiser ads by default (contextual_multi_ads with OPT_OUT)
+
+### Video Thumbnails
+- [x] Fix grey thumbnails - now waits for video processing before fetching thumbnail (polling up to 60s)
