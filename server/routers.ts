@@ -328,7 +328,10 @@ export const appRouter = router({
         mimeType: z.string(),
       }))
       .mutation(async ({ input }) => {
+        const startTime = Date.now();
+        console.log("\n" + "=".repeat(80));
         console.log("[uploadFromGoogleDrive] ====== START ======");
+        console.log("[uploadFromGoogleDrive] Timestamp:", new Date().toISOString());
         console.log("[uploadFromGoogleDrive] File:", input.fileName);
         console.log("[uploadFromGoogleDrive] MimeType:", input.mimeType);
         console.log("[uploadFromGoogleDrive] FileId:", input.fileId);
@@ -337,16 +340,25 @@ export const appRouter = router({
         console.log("[uploadFromGoogleDrive] Meta Token length:", input.accessToken?.length || 0);
         
         try {
-          // Download file from Google Drive
+          // Download file from Google Drive with AbortController for timeout
           console.log("[uploadFromGoogleDrive] Step 1: Downloading from Google Drive...");
+          const downloadStartTime = Date.now();
+          
+          // Create AbortController with 5 minute timeout for large videos
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 minutes
+          
           const driveResponse = await fetch(
             `https://www.googleapis.com/drive/v3/files/${input.fileId}?alt=media`,
             {
               headers: {
                 Authorization: `Bearer ${input.googleAccessToken}`,
               },
+              signal: controller.signal,
             }
           );
+          
+          clearTimeout(timeoutId);
           
           if (!driveResponse.ok) {
             const errorText = await driveResponse.text();
@@ -356,9 +368,11 @@ export const appRouter = router({
           
           const fileBuffer = await driveResponse.arrayBuffer();
           const blob = new Blob([fileBuffer], { type: input.mimeType });
+          const downloadTime = Date.now() - downloadStartTime;
           
           console.log("[uploadFromGoogleDrive] Step 2: Downloaded from Drive");
           console.log("[uploadFromGoogleDrive] - Size:", fileBuffer.byteLength, "bytes (", Math.round(fileBuffer.byteLength / 1024 / 1024), "MB)");
+          console.log("[uploadFromGoogleDrive] - Download time:", downloadTime, "ms (", Math.round(downloadTime / 1000), "s)");
           
           // Determine if image or video
           const isVideo = input.mimeType.startsWith("video/");
@@ -380,11 +394,23 @@ export const appRouter = router({
           formData.append("source", blob, input.fileName);
           formData.append("access_token", input.accessToken);
           
-          // Upload to Meta
+          // Upload to Meta with timeout
+          console.log("[uploadFromGoogleDrive] Sending POST request to Meta...");
+          const uploadStartTime = Date.now();
+          
+          // Create AbortController with 10 minute timeout for large video uploads
+          const uploadController = new AbortController();
+          const uploadTimeoutId = setTimeout(() => uploadController.abort(), 10 * 60 * 1000); // 10 minutes
+          
           const metaResponse = await fetch(endpoint, {
             method: "POST",
             body: formData,
+            signal: uploadController.signal,
           });
+          
+          clearTimeout(uploadTimeoutId);
+          const uploadTime = Date.now() - uploadStartTime;
+          console.log("[uploadFromGoogleDrive] - Upload time:", uploadTime, "ms (", Math.round(uploadTime / 1000), "s)");
           
           const data = await metaResponse.json();
           
@@ -403,8 +429,13 @@ export const appRouter = router({
             throw new Error(data.error.message || "Failed to upload to Meta");
           }
           
+          const totalTime = Date.now() - startTime;
+          
           if (isVideo) {
+            console.log("[uploadFromGoogleDrive] ====== SUCCESS ======");
             console.log("[uploadFromGoogleDrive] Video uploaded! ID:", data.id);
+            console.log("[uploadFromGoogleDrive] Total time:", totalTime, "ms (", Math.round(totalTime / 1000), "s)");
+            console.log("=".repeat(80) + "\n");
             return { 
               success: true, 
               videoId: data.id,
@@ -416,7 +447,10 @@ export const appRouter = router({
             const imageKey = Object.keys(images)[0];
             const imageHash = images[imageKey]?.hash;
             
+            console.log("[uploadFromGoogleDrive] ====== SUCCESS ======");
             console.log("[uploadFromGoogleDrive] Image uploaded! Hash:", imageHash);
+            console.log("[uploadFromGoogleDrive] Total time:", totalTime, "ms (", Math.round(totalTime / 1000), "s)");
+            console.log("=".repeat(80) + "\n");
             return { 
               success: true, 
               hash: imageHash,
@@ -425,7 +459,11 @@ export const appRouter = router({
             };
           }
         } catch (error: any) {
-          console.error("[uploadFromGoogleDrive] Failed:", error.message);
+          const totalTime = Date.now() - startTime;
+          console.error("[uploadFromGoogleDrive] ====== FAILED ======");
+          console.error("[uploadFromGoogleDrive] Error:", error.message);
+          console.error("[uploadFromGoogleDrive] Total time before failure:", totalTime, "ms (", Math.round(totalTime / 1000), "s)");
+          console.error("=".repeat(80) + "\n");
           throw new Error(error.message || "Failed to upload from Google Drive to Meta");
         }
       }),

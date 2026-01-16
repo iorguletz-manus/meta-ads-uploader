@@ -853,9 +853,21 @@ export default function Home() {
         // Fallback: try to detect from filename if no dimensions from API
         if (aspectRatio === "1x1") {
           const name = file.name.toLowerCase();
-          if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
-          else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
-          else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+          // Check for common aspect ratio patterns in filename
+          if (name.includes("9x16") || name.includes("9_16") || name.includes("916") || name.includes("vertical") || name.includes("story") || name.includes("stories") || name.includes("reel")) {
+            aspectRatio = "9x16";
+          } else if (name.includes("4x5") || name.includes("4_5") || name.includes("45") || name.includes("feed")) {
+            aspectRatio = "4x5";
+          } else if (name.includes("16x9") || name.includes("16_9") || name.includes("169") || name.includes("horizontal") || name.includes("landscape")) {
+            aspectRatio = "16x9";
+          } else if (name.includes("1x1") || name.includes("1_1") || name.includes("square")) {
+            aspectRatio = "1x1";
+          }
+          // If still 1x1 and it's a video, default to 9x16 (most common for ads)
+          if (aspectRatio === "1x1" && isVideo) {
+            console.log(`[Google Drive] No aspect ratio detected for video ${file.name}, defaulting to 9x16`);
+            aspectRatio = "9x16";
+          }
         }
         
         // If we still don't have thumbnail, try other methods
@@ -1179,10 +1191,16 @@ export default function Home() {
         } else {
           // Local file - Upload video to Meta via base64
           console.log(`[Upload] Local video: ${media.name}`);
+          
+          // Check if we have base64 data
+          if (!media.base64) {
+            throw new Error(`No base64 data for video ${media.name}. Please re-add the video.`);
+          }
+          
           const result = await uploadVideoToMetaMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
-            videoBase64: media.base64,
+            base64Data: media.base64, // Fixed: was videoBase64, should be base64Data
             fileName: media.name,
           });
           

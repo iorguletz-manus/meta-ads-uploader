@@ -489,3 +489,16 @@
 - [x] Backend verifică dacă există metaHash/metaVideoId înainte să încerce upload
 - [x] Frontend trimite metaHash și metaVideoId la batchCreateAds
 
+
+## Bug Fix - Round 28
+
+### Video Upload Fix
+- [x] Fix: Frontend trimitea `videoBase64` dar backend aștepta `base64Data` - corectat
+- [x] Adăugat verificare dacă base64 există înainte de upload video local
+- [x] Adăugat timeout 5 minute pentru download Google Drive și 10 minute pentru upload Meta
+- [x] Logging îmbunătățit cu timestamps și durate pentru debugging
+
+### Aspect Ratio Detection
+- [x] Adăugat mai multe pattern-uri pentru detectare din filename (vertical, story, reel, feed, etc.)
+- [x] Default la 9x16 pentru video-uri fără aspect ratio detectat (cel mai comun pentru ads)
+
