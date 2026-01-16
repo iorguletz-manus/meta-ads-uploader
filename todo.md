@@ -450,7 +450,35 @@
 - [x] Google Picker - List view ca default (nu Grid)
 
 
+## Bug Fix - Round 26
+
+- [ ] Google OAuth - Authorization Code flow cu refresh token (60 zile)
+- [x] Fix aspect ratio pentru video - detectare din Google Drive metadata (videoMediaMetadata)
+- [x] Fix upload video pe Meta - adăugat logging detaliat pentru a vedea eroarea exactă
+
+
 ## Bug Fix - Round 22
 
 - [ ] Google Drive - salvare token în sesiune pentru a evita re-login la fiecare import
 - [ ] Dezactivare upload Bunny CDN - doar upload direct pe Meta
+
+
+## Bug Fix - Round 27
+
+### Google OAuth
+- [x] Implementare Authorization Code flow cu refresh token pentru 60 zile persistență
+- [x] Frontend folosește initCodeClient în loc de initTokenClient
+- [x] Backend exchangeCode endpoint salvează refresh_token în DB
+- [x] Backend getToken face refresh automat când token-ul expiră
+
+### Video Aspect Ratio
+- [x] Detectare aspect ratio din dimensiunile reale ale video-ului (videoWidth/videoHeight)
+- [x] extractVideoThumbnail returnează acum și width/height
+- [x] Fallback la detectare din filename dacă dimensiunile nu sunt disponibile
+
+### Google Drive Thumbnails
+- [x] Fix afișare thumbnail-uri pentru fișiere Google Drive
+- [x] Folosire googleDriveThumbnail în toate locurile de afișare
+- [x] Obținere thumbnail din Google Drive API metadata (thumbnailLink)
+- [x] Logging îmbunătățit pentru debugging thumbnail-uri
+

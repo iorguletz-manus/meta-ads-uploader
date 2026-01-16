@@ -328,10 +328,17 @@ export const appRouter = router({
         mimeType: z.string(),
       }))
       .mutation(async ({ input }) => {
-        console.log("[uploadFromGoogleDrive] Starting for:", input.fileName);
+        console.log("[uploadFromGoogleDrive] ====== START ======");
+        console.log("[uploadFromGoogleDrive] File:", input.fileName);
+        console.log("[uploadFromGoogleDrive] MimeType:", input.mimeType);
+        console.log("[uploadFromGoogleDrive] FileId:", input.fileId);
+        console.log("[uploadFromGoogleDrive] AdAccountId:", input.adAccountId);
+        console.log("[uploadFromGoogleDrive] Google Token length:", input.googleAccessToken?.length || 0);
+        console.log("[uploadFromGoogleDrive] Meta Token length:", input.accessToken?.length || 0);
         
         try {
           // Download file from Google Drive
+          console.log("[uploadFromGoogleDrive] Step 1: Downloading from Google Drive...");
           const driveResponse = await fetch(
             `https://www.googleapis.com/drive/v3/files/${input.fileId}?alt=media`,
             {
@@ -342,19 +349,26 @@ export const appRouter = router({
           );
           
           if (!driveResponse.ok) {
-            throw new Error("Failed to download from Google Drive");
+            const errorText = await driveResponse.text();
+            console.error("[uploadFromGoogleDrive] Google Drive download failed:", driveResponse.status, errorText);
+            throw new Error(`Failed to download from Google Drive: ${driveResponse.status} - ${errorText}`);
           }
           
           const fileBuffer = await driveResponse.arrayBuffer();
           const blob = new Blob([fileBuffer], { type: input.mimeType });
           
-          console.log("[uploadFromGoogleDrive] Downloaded from Drive, size:", fileBuffer.byteLength);
+          console.log("[uploadFromGoogleDrive] Step 2: Downloaded from Drive");
+          console.log("[uploadFromGoogleDrive] - Size:", fileBuffer.byteLength, "bytes (", Math.round(fileBuffer.byteLength / 1024 / 1024), "MB)");
           
           // Determine if image or video
           const isVideo = input.mimeType.startsWith("video/");
           const endpoint = isVideo 
             ? `${META_API_BASE}/${input.adAccountId}/advideos`
             : `${META_API_BASE}/${input.adAccountId}/adimages`;
+          
+          console.log("[uploadFromGoogleDrive] Step 3: Uploading to Meta");
+          console.log("[uploadFromGoogleDrive] - Type:", isVideo ? "VIDEO" : "IMAGE");
+          console.log("[uploadFromGoogleDrive] - Endpoint:", endpoint);
           
           // Create form data
           const formData = new FormData();
@@ -374,8 +388,18 @@ export const appRouter = router({
           
           const data = await metaResponse.json();
           
+          console.log("[uploadFromGoogleDrive] Step 4: Meta response received");
+          console.log("[uploadFromGoogleDrive] - Status:", metaResponse.status);
+          console.log("[uploadFromGoogleDrive] - Response:", JSON.stringify(data, null, 2));
+          
           if (data.error) {
-            console.error("[uploadFromGoogleDrive] Meta error:", data.error);
+            console.error("[uploadFromGoogleDrive] ====== ERROR ======");
+            console.error("[uploadFromGoogleDrive] Error code:", data.error.code);
+            console.error("[uploadFromGoogleDrive] Error type:", data.error.type);
+            console.error("[uploadFromGoogleDrive] Error message:", data.error.message);
+            console.error("[uploadFromGoogleDrive] Error subcode:", data.error.error_subcode);
+            console.error("[uploadFromGoogleDrive] Error user msg:", data.error.error_user_msg);
+            console.error("[uploadFromGoogleDrive] FBTrace ID:", data.error.fbtrace_id);
             throw new Error(data.error.message || "Failed to upload to Meta");
           }
           

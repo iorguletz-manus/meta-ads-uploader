@@ -202,8 +202,14 @@ const combineHookAndBody = (hook: string, body: string): string => {
   return `${trimmedHook}\n\n${trimmedBody}`;
 };
 
-// Extract thumbnail from video (first frame at 1 second)
-const extractVideoThumbnail = (videoFile: File): Promise<string> => {
+// Extract thumbnail from video (first frame at 1 second) and return dimensions
+interface VideoThumbnailResult {
+  thumbnail: string;
+  width: number;
+  height: number;
+}
+
+const extractVideoThumbnail = (videoFile: File): Promise<VideoThumbnailResult> => {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     const canvas = document.createElement('canvas');
@@ -219,10 +225,15 @@ const extractVideoThumbnail = (videoFile: File): Promise<string> => {
     };
     
     video.onseeked = () => {
+      // Get actual video dimensions
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      console.log(`[Video] Dimensions: ${videoWidth}x${videoHeight}`);
+      
       // Set canvas size to video dimensions (max 320px width for thumbnail)
-      const scale = Math.min(1, 320 / video.videoWidth);
-      canvas.width = video.videoWidth * scale;
-      canvas.height = video.videoHeight * scale;
+      const scale = Math.min(1, 320 / videoWidth);
+      canvas.width = videoWidth * scale;
+      canvas.height = videoHeight * scale;
       
       // Draw the frame
       ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -232,7 +243,7 @@ const extractVideoThumbnail = (videoFile: File): Promise<string> => {
       
       // Cleanup
       URL.revokeObjectURL(video.src);
-      resolve(thumbnail);
+      resolve({ thumbnail, width: videoWidth, height: videoHeight });
     };
     
     video.onerror = () => {
@@ -606,6 +617,9 @@ export default function Home() {
   const [isLoadingGoogleDrive, setIsLoadingGoogleDrive] = useState(false);
 
   // Google Drive Connect - opens picker
+  // Exchange Google auth code mutation
+  const exchangeGoogleCodeMutation = (trpc as any).google?.exchangeCode?.useMutation();
+
   const handleGoogleDriveConnect = async () => {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
       toast.error("Google API credentials not configured");
@@ -635,39 +649,49 @@ export default function Home() {
         return;
       }
 
-      // Get new access token via Google Identity Services
-      const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+      // Use Authorization Code flow to get refresh token (for 60-day persistence)
+      const google = (window as any).google;
+      const codeClient = google.accounts.oauth2.initCodeClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: GOOGLE_SCOPES,
+        ux_mode: 'popup',
         callback: async (response: any) => {
-          if (response.access_token) {
-            console.log("[Google Drive] Got new token, saving to DB...");
-            setGoogleAccessToken(response.access_token);
-            
-            // Save token to DB (expires_in is usually 3600 seconds = 1 hour)
-            // But we'll set it to 60 days since Google will auto-refresh with our refresh token
+          if (response.code) {
+            console.log("[Google Drive] Got authorization code, exchanging for tokens...");
             try {
-              await saveGoogleTokenMutation?.mutateAsync({
-                accessToken: response.access_token,
-                refreshToken: null, // Google's implicit flow doesn't give refresh token
-                expiresIn: response.expires_in || 3600,
+              // Exchange code for tokens on server (gets refresh token)
+              const result = await exchangeGoogleCodeMutation?.mutateAsync({
+                code: response.code,
+                redirectUri: window.location.origin,
               });
-              console.log("[Google Drive] Token saved to DB");
-            } catch (err) {
-              console.error("[Google Drive] Failed to save token:", err);
+              
+              if (result?.accessToken) {
+                console.log("[Google Drive] Got tokens! Has refresh token:", result.hasRefreshToken);
+                setGoogleAccessToken(result.accessToken);
+                
+                // Refetch the token query to update cache
+                googleTokenQuery?.refetch();
+                
+                openGooglePicker(result.accessToken);
+              } else {
+                toast.error("Failed to get access token");
+                setIsLoadingGoogleDrive(false);
+              }
+            } catch (err: any) {
+              console.error("[Google Drive] Token exchange failed:", err);
+              toast.error(err.message || "Failed to authenticate with Google");
+              setIsLoadingGoogleDrive(false);
             }
-            
-            // Open picker with the token
-            openGooglePicker(response.access_token);
-          } else {
-            toast.error("Failed to get Google access token");
+          } else if (response.error) {
+            console.error("[Google Drive] Auth error:", response.error);
+            toast.error("Google authentication failed");
             setIsLoadingGoogleDrive(false);
           }
         },
       });
 
-      // Request access token - use prompt: '' to avoid showing consent screen if already authorized
-      tokenClient.requestAccessToken({ prompt: '' });
+      // Request authorization code (will open popup)
+      codeClient.requestCode();
     } catch (error) {
       console.error("Google Drive error:", error);
       toast.error("Failed to connect to Google Drive");
@@ -772,26 +796,81 @@ export default function Home() {
           continue;
         }
         
-        // Detect aspect ratio from filename
-        let aspectRatio = "1x1";
-        const name = file.name.toLowerCase();
-        if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
-        else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
-        else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
-        else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
-        
-        // Get real thumbnail from Google Drive API (especially important for videos)
+        // Get real thumbnail and video dimensions from Google Drive API
         let thumbnailUrl = '';
-        if (isVideo) {
-          // For videos, always fetch real thumbnail from API
-          thumbnailUrl = await getRealThumbnail(file.id);
-          console.log(`[Google Drive] Video thumbnail for ${file.name}:`, thumbnailUrl || 'not available');
-        } else {
-          // For images, use picker thumbnail or fetch from API
-          thumbnailUrl = file.thumbnails && file.thumbnails.length > 0 
-            ? file.thumbnails[file.thumbnails.length - 1].url 
-            : await getRealThumbnail(file.id);
+        let aspectRatio = "1x1";
+        
+        // Always try to get metadata from Google Drive API for thumbnail and dimensions
+        try {
+          const metadataResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${file.id}?fields=videoMediaMetadata,imageMediaMetadata,thumbnailLink,hasThumbnail`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
+          if (metadataResponse.ok) {
+            const metadata = await metadataResponse.json();
+            console.log(`[Google Drive] Metadata for ${file.name}:`, JSON.stringify(metadata));
+            
+            // Get thumbnail - use larger size
+            if (metadata.thumbnailLink) {
+              thumbnailUrl = metadata.thumbnailLink.replace('=s220', '=s400');
+              console.log(`[Google Drive] Thumbnail URL for ${file.name}:`, thumbnailUrl);
+            }
+            
+            // Get dimensions for video
+            if (isVideo && metadata.videoMediaMetadata) {
+              const { width, height } = metadata.videoMediaMetadata;
+              if (width && height) {
+                const ratio = width / height;
+                console.log(`[Google Drive] Video dimensions: ${width}x${height}, ratio: ${ratio}`);
+                if (ratio < 0.65) aspectRatio = "9x16";
+                else if (ratio < 0.9) aspectRatio = "4x5";
+                else if (ratio < 1.1) aspectRatio = "1x1";
+                else aspectRatio = "16x9";
+              }
+            }
+            
+            // Get dimensions for image
+            if (!isVideo && metadata.imageMediaMetadata) {
+              const { width, height } = metadata.imageMediaMetadata;
+              if (width && height) {
+                const ratio = width / height;
+                console.log(`[Google Drive] Image dimensions: ${width}x${height}, ratio: ${ratio}`);
+                if (ratio < 0.65) aspectRatio = "9x16";
+                else if (ratio < 0.9) aspectRatio = "4x5";
+                else if (ratio < 1.1) aspectRatio = "1x1";
+                else aspectRatio = "16x9";
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[Google Drive] Failed to get metadata for ${file.name}:`, err);
         }
+        
+        // Fallback: try to detect from filename if no dimensions from API
+        if (aspectRatio === "1x1") {
+          const name = file.name.toLowerCase();
+          if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
+          else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
+          else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+        }
+        
+        // If we still don't have thumbnail, try other methods
+        if (!thumbnailUrl) {
+          console.log(`[Google Drive] No thumbnail from metadata for ${file.name}, trying fallback...`);
+          if (file.thumbnails && file.thumbnails.length > 0) {
+            thumbnailUrl = file.thumbnails[file.thumbnails.length - 1].url;
+            console.log(`[Google Drive] Using picker thumbnail for ${file.name}:`, thumbnailUrl);
+          } else {
+            thumbnailUrl = await getRealThumbnail(file.id);
+            console.log(`[Google Drive] Fallback thumbnail for ${file.name}:`, thumbnailUrl || 'not available');
+          }
+        }
+        
+        console.log(`[Google Drive] Final aspect ratio for ${file.name}: ${aspectRatio}`);
         
         const mediaFile: MediaFile = {
           id: `gdrive_${file.id}_${Date.now()}`,
@@ -914,23 +993,47 @@ export default function Home() {
           img.onerror = () => resolve("1x1");
           img.src = URL.createObjectURL(file);
         });
-      } else {
-        // For videos, try to detect from filename or default to 9x16
-        const name = file.name.toLowerCase();
-        if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
-        else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
-        else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
-        else aspectRatio = "9x16"; // Default for videos
       }
 
-      // Extract thumbnail for videos
+      // Extract thumbnail for videos and detect aspect ratio from actual dimensions
       let thumbnail: string | undefined;
       if (isVideo) {
         try {
-          thumbnail = await extractVideoThumbnail(file);
-          console.log(`[Thumbnail] Extracted for ${file.name}`);
+          const result = await extractVideoThumbnail(file);
+          thumbnail = result.thumbnail;
+          
+          // Detect aspect ratio from actual video dimensions
+          const { width, height } = result;
+          if (width > 0 && height > 0) {
+            const ratio = width / height;
+            console.log(`[Video] ${file.name}: ${width}x${height}, ratio=${ratio.toFixed(3)}`);
+            // 9x16 = 0.5625, 4x5 = 0.8, 1x1 = 1.0, 16x9 = 1.778
+            if (ratio < 0.65) {
+              aspectRatio = "9x16"; // Portrait tall (9:16)
+            } else if (ratio < 0.9) {
+              aspectRatio = "4x5"; // Portrait (4:5)
+            } else if (ratio < 1.1) {
+              aspectRatio = "1x1"; // Square
+            } else {
+              aspectRatio = "16x9"; // Landscape
+            }
+            console.log(`[Video] ${file.name}: Detected aspect ratio: ${aspectRatio}`);
+          } else {
+            // Fallback to filename detection
+            const name = file.name.toLowerCase();
+            if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+            else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
+            else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
+            else aspectRatio = "9x16"; // Default for videos
+          }
         } catch (err) {
           console.error(`[Thumbnail] Failed for ${file.name}:`, err);
+          // Fallback to filename detection
+          const name = file.name.toLowerCase();
+          if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+          else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
+          else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
+          else aspectRatio = "9x16"; // Default for videos
         }
       }
 
@@ -2035,11 +2138,11 @@ export default function Home() {
                             {media.map((m) => (
                               <div key={m.id} className="relative group w-12 h-12 rounded overflow-hidden bg-muted flex-shrink-0">
                                 {m.type === "image" ? (
-                                  <img src={m.preview} alt="" className="w-full h-full object-cover" />
+                                  <img src={m.preview || m.thumbnail || m.googleDriveThumbnail || ''} alt="" className="w-full h-full object-cover" />
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center bg-slate-800 relative">
-                                    {m.thumbnail ? (
-                                      <img src={m.thumbnail} alt="" className="w-full h-full object-cover" />
+                                    {(m.thumbnail || m.googleDriveThumbnail) ? (
+                                      <img src={m.thumbnail || m.googleDriveThumbnail || ''} alt="" className="w-full h-full object-cover" />
                                     ) : (
                                       <Play className="h-3 w-3 text-white" />
                                     )}
@@ -2328,7 +2431,15 @@ export default function Home() {
                                         }}
                                       >
                                         {m.type === "image" ? (
-                                          <img src={m.preview} alt="" className="w-full h-full object-cover" />
+                                          <img src={m.preview || m.thumbnail || m.googleDriveThumbnail || ''} alt="" className="w-full h-full object-cover" />
+                                        ) : m.isGoogleDrive ? (
+                                          // For Google Drive videos, show thumbnail since we don't have the video file locally
+                                          <div className="w-full h-full bg-slate-800 relative flex items-center justify-center">
+                                            {(m.thumbnail || m.googleDriveThumbnail) ? (
+                                              <img src={m.thumbnail || m.googleDriveThumbnail || ''} alt="" className="w-full h-full object-cover" />
+                                            ) : null}
+                                            <Play className="absolute h-8 w-8 text-white drop-shadow-lg" />
+                                          </div>
                                         ) : (
                                           <video
                                             src={m.preview}
