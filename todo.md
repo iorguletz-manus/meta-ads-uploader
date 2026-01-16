@@ -638,3 +638,16 @@
 - [ ] Add degreesOfFreedomSpec to batchCreateAds input schema
 - [ ] Pass degreesOfFreedomSpec from frontend when creating ads
 - [ ] Apply degreesOfFreedomSpec when creating creative
+
+
+## Feature - Round 25: Disable All Advantage+ Creative Enhancements
+
+### Goal
+- Disable all Advantage+ creative enhancements when creating new ads
+- Use correct structure: degrees_of_freedom_spec.creative_features_spec
+
+### Tasks
+- [x] Add degrees_of_freedom_spec with all features OPT_OUT to video creative (batchCreateAds)
+- [x] Add degrees_of_freedom_spec with all features OPT_OUT to image creative (batchCreateAds)
+- [x] Add degrees_of_freedom_spec with all features OPT_OUT to createAd (multiple images)
+- [x] Add degrees_of_freedom_spec with all features OPT_OUT to createAd (single image)
