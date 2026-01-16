@@ -28,6 +28,12 @@ export const users = mysqlTable("users", {
   selectedAdAccountId: varchar("selectedAdAccountId", { length: 64 }),
   /** Enabled Ad Account IDs (JSON array) */
   enabledAdAccountIds: text("enabledAdAccountIds"),
+  /** Google access token for Google Drive API */
+  googleAccessToken: text("googleAccessToken"),
+  /** Google refresh token for long-lived access */
+  googleRefreshToken: text("googleRefreshToken"),
+  /** Google token expiry timestamp */
+  googleTokenExpiry: timestamp("googleTokenExpiry"),
 });
 
 export type User = typeof users.$inferSelect;

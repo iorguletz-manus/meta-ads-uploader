@@ -229,3 +229,133 @@ export async function getAdAccountSettings(openId: string): Promise<{
     return null;
   }
 }
+
+
+// Google token management
+export async function saveGoogleToken(
+  openId: string, 
+  accessToken: string, 
+  refreshToken: string | null,
+  expiresIn: number
+): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot save Google token: database not available");
+    return;
+  }
+
+  try {
+    // Calculate expiry date (expiresIn is in seconds)
+    // For Google, access tokens expire in ~1 hour, but we use refresh token to get new ones
+    const expiryDate = new Date(Date.now() + expiresIn * 1000);
+    
+    await db.update(users)
+      .set({
+        googleAccessToken: accessToken,
+        googleRefreshToken: refreshToken,
+        googleTokenExpiry: expiryDate,
+      })
+      .where(eq(users.openId, openId));
+  } catch (error) {
+    console.error("[Database] Failed to save Google token:", error);
+    throw error;
+  }
+}
+
+export async function getGoogleToken(openId: string): Promise<{ 
+  accessToken: string; 
+  refreshToken: string | null;
+  expiry: Date;
+} | null> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get Google token: database not available");
+    return null;
+  }
+
+  try {
+    const result = await db.select({
+      accessToken: users.googleAccessToken,
+      refreshToken: users.googleRefreshToken,
+      expiry: users.googleTokenExpiry,
+    }).from(users).where(eq(users.openId, openId)).limit(1);
+
+    if (result.length === 0 || !result[0].accessToken) {
+      return null;
+    }
+
+    return {
+      accessToken: result[0].accessToken,
+      refreshToken: result[0].refreshToken,
+      expiry: result[0].expiry || new Date(),
+    };
+  } catch (error) {
+    console.error("[Database] Failed to get Google token:", error);
+    return null;
+  }
+}
+
+export async function clearGoogleToken(openId: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot clear Google token: database not available");
+    return;
+  }
+
+  try {
+    await db.update(users)
+      .set({
+        googleAccessToken: null,
+        googleRefreshToken: null,
+        googleTokenExpiry: null,
+      })
+      .where(eq(users.openId, openId));
+  } catch (error) {
+    console.error("[Database] Failed to clear Google token:", error);
+    throw error;
+  }
+}
+
+// Refresh Google access token using refresh token
+export async function refreshGoogleAccessToken(refreshToken: string): Promise<{
+  accessToken: string;
+  expiresIn: number;
+} | null> {
+  const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  
+  if (!clientId || !clientSecret) {
+    console.error("[Google] Missing client credentials");
+    return null;
+  }
+
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+
+    const data = await response.json();
+    
+    if (data.error) {
+      console.error("[Google] Token refresh failed:", data.error);
+      return null;
+    }
+
+    return {
+      accessToken: data.access_token,
+      expiresIn: data.expires_in || 3600,
+    };
+  } catch (error) {
+    console.error("[Google] Token refresh error:", error);
+    return null;
+  }
+}

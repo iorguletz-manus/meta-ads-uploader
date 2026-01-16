@@ -392,6 +392,13 @@ export default function Home() {
   const uploadVideoToMetaMutation = (trpc.meta as any).uploadVideoToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
   const uploadFromGoogleDriveMutation = (trpc.meta as any).uploadFromGoogleDriveToMeta?.useMutation() || { mutateAsync: async () => { throw new Error('Not available'); } };
 
+  // Google token management
+  const googleTokenQuery = (trpc as any).google?.getToken?.useQuery(undefined, {
+    enabled: !!user,
+  });
+  const saveGoogleTokenMutation = (trpc as any).google?.saveToken?.useMutation();
+  const clearGoogleTokenMutation = (trpc as any).google?.clearToken?.useMutation();
+
   // State for upload progress
   const [isUploadingToMeta, setIsUploadingToMeta] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ total: number; completed: number; failed: number }>({ total: 0, completed: 0, failed: 0 });
@@ -607,13 +614,44 @@ export default function Home() {
       await loadGoogleIdentity();
       await loadGooglePicker();
 
-      // Get access token via Google Identity Services
+      // Check if we have a saved token from DB
+      const savedToken = googleTokenQuery?.data;
+      if (savedToken?.accessToken) {
+        console.log("[Google Drive] Using saved token from DB");
+        setGoogleAccessToken(savedToken.accessToken);
+        openGooglePicker(savedToken.accessToken);
+        return;
+      }
+
+      // Check if we have token in state
+      if (googleAccessToken) {
+        console.log("[Google Drive] Using token from state");
+        openGooglePicker(googleAccessToken);
+        return;
+      }
+
+      // Get new access token via Google Identity Services
       const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: GOOGLE_SCOPES,
         callback: async (response: any) => {
           if (response.access_token) {
+            console.log("[Google Drive] Got new token, saving to DB...");
             setGoogleAccessToken(response.access_token);
+            
+            // Save token to DB (expires_in is usually 3600 seconds = 1 hour)
+            // But we'll set it to 60 days since Google will auto-refresh with our refresh token
+            try {
+              await saveGoogleTokenMutation?.mutateAsync({
+                accessToken: response.access_token,
+                refreshToken: null, // Google's implicit flow doesn't give refresh token
+                expiresIn: response.expires_in || 3600,
+              });
+              console.log("[Google Drive] Token saved to DB");
+            } catch (err) {
+              console.error("[Google Drive] Failed to save token:", err);
+            }
+            
             // Open picker with the token
             openGooglePicker(response.access_token);
           } else {
@@ -623,13 +661,8 @@ export default function Home() {
         },
       });
 
-      // Request access token
-      if (googleAccessToken) {
-        // Already have token, just open picker
-        openGooglePicker(googleAccessToken);
-      } else {
-        tokenClient.requestAccessToken({ prompt: '' });
-      }
+      // Request access token - use prompt: '' to avoid showing consent screen if already authorized
+      tokenClient.requestAccessToken({ prompt: '' });
     } catch (error) {
       console.error("Google Drive error:", error);
       toast.error("Failed to connect to Google Drive");
@@ -742,7 +775,7 @@ export default function Home() {
   // Handle file upload
   const handleFileUpload = useCallback(async (files: FileList) => {
     const newMedia: MediaFile[] = [];
-    toast.info(`Processing ${files.length} file(s)... Uploading to CDN...`);
+    toast.info(`Processing ${files.length} file(s)...`);
 
     for (const file of Array.from(files)) {
       const isVideo = file.type.startsWith("video/");
@@ -759,7 +792,7 @@ export default function Home() {
       } else {
         // For videos, keep original (but warn if too large)
         if (file.size > 50 * 1024 * 1024) {
-          toast.warning(`Video ${file.name} is large (${(file.size / 1024 / 1024).toFixed(1)}MB). Upload may fail.`);
+          toast.warning(`Video ${file.name} is large (${(file.size / 1024 / 1024).toFixed(1)}MB). Upload may take a while.`);
         }
         base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
@@ -802,39 +835,36 @@ export default function Home() {
         else aspectRatio = "9x16"; // Default for videos
       }
 
-      // Upload to Bunny.net CDN
-      let cdnUrl: string | undefined;
-      let bunnyPath: string | undefined;
-      try {
-        const uploadResult = await uploadToBunnyMutation.mutateAsync({
-          fileName: file.name,
-          base64Data: base64,
-          contentType: file.type,
-        });
-        cdnUrl = uploadResult.cdnUrl;
-        bunnyPath = uploadResult.path;
-        console.log(`[Bunny] Uploaded: ${file.name} -> ${cdnUrl}`);
-      } catch (err) {
-        console.error(`[Bunny] Upload failed for ${file.name}:`, err);
-        toast.error(`Failed to upload ${file.name} to CDN`);
+      // Extract thumbnail for videos
+      let thumbnail: string | undefined;
+      if (isVideo) {
+        try {
+          thumbnail = await extractVideoThumbnail(file);
+          console.log(`[Thumbnail] Extracted for ${file.name}`);
+        } catch (err) {
+          console.error(`[Thumbnail] Failed for ${file.name}:`, err);
+        }
       }
+
+      // NO Bunny upload - files stay local until "UPLOAD TO META" is clicked
+      // Bunny functions are kept as backup in bunnyStorage.ts
 
       newMedia.push({
         id: `media-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file,
-        preview: cdnUrl || preview, // Use CDN URL as preview if available
+        preview, // Local preview URL
         name: file.name,
         aspectRatio,
         base64,
         type: isVideo ? "video" : "image",
-        cdnUrl,
-        bunnyPath,
+        thumbnail, // Video thumbnail
+        uploadStatus: 'pending', // Ready to upload to Meta
       });
     }
 
     setMediaPool((prev) => [...prev, ...newMedia]);
-    toast.success(`${newMedia.length} file(s) uploaded to CDN`);
-  }, [uploadToBunnyMutation]);
+    toast.success(`${newMedia.length} file(s) added. Click "UPLOAD TO META" to upload.`);
+  }, []);
 
   // Group media by prefix
   const groupMediaByPrefix = (media: MediaFile[]): Map<string, MediaFile[]> => {

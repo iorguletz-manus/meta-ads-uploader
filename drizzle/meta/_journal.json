@@ -22,6 +22,13 @@
       "when": 1768485764981,
       "tag": "0002_left_serpent_society",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1768562548572,
+      "tag": "0003_needy_leopardon",
+      "breakpoints": true
     }
   ]
 }

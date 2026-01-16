@@ -1,6 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
-import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings } from "./db";
+import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings, saveGoogleToken, getGoogleToken, clearGoogleToken, refreshGoogleAccessToken } from "./db";
 import { uploadToBunny, deleteFromBunny } from "./bunnyStorage";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -1505,6 +1505,127 @@ export const appRouter = router({
           adSetId: newAdSet.id,
           adSetName: input.newAdSetName,
           results,
+        };
+      }),
+  }),
+
+  // Google Drive API
+  google: router({
+    // Save Google token to DB
+    saveToken: protectedProcedure
+      .input(z.object({
+        accessToken: z.string(),
+        refreshToken: z.string().nullable(),
+        expiresIn: z.number(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Not authenticated");
+        
+        await saveGoogleToken(
+          ctx.user.openId,
+          input.accessToken,
+          input.refreshToken,
+          input.expiresIn
+        );
+        
+        return { success: true };
+      }),
+
+    // Get saved Google token
+    getToken: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user) return null;
+      
+      const tokenData = await getGoogleToken(ctx.user.openId);
+      if (!tokenData) return null;
+      
+      // Check if token is expired
+      const now = new Date();
+      if (now > tokenData.expiry) {
+        // Try to refresh using refresh token
+        if (tokenData.refreshToken) {
+          const newToken = await refreshGoogleAccessToken(tokenData.refreshToken);
+          if (newToken) {
+            // Save new access token
+            await saveGoogleToken(
+              ctx.user.openId,
+              newToken.accessToken,
+              tokenData.refreshToken,
+              newToken.expiresIn
+            );
+            return {
+              accessToken: newToken.accessToken,
+              expiresIn: newToken.expiresIn,
+            };
+          }
+        }
+        // Token expired and couldn't refresh
+        return null;
+      }
+      
+      // Token still valid
+      const remainingSeconds = Math.floor((tokenData.expiry.getTime() - now.getTime()) / 1000);
+      return {
+        accessToken: tokenData.accessToken,
+        expiresIn: remainingSeconds,
+      };
+    }),
+
+    // Clear Google token
+    clearToken: protectedProcedure.mutation(async ({ ctx }) => {
+      if (!ctx.user) throw new Error("Not authenticated");
+      await clearGoogleToken(ctx.user.openId);
+      return { success: true };
+    }),
+
+    // Exchange authorization code for tokens (with refresh token)
+    exchangeCode: protectedProcedure
+      .input(z.object({
+        code: z.string(),
+        redirectUri: z.string(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Not authenticated");
+        
+        const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
+        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        
+        if (!clientId || !clientSecret) {
+          throw new Error("Google credentials not configured");
+        }
+        
+        // Exchange code for tokens
+        const response = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
+            code: input.code,
+            redirect_uri: input.redirectUri,
+            grant_type: 'authorization_code',
+          }),
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error_description || data.error);
+        }
+        
+        // Save tokens to DB
+        await saveGoogleToken(
+          ctx.user.openId,
+          data.access_token,
+          data.refresh_token || null,
+          data.expires_in || 3600
+        );
+        
+        return {
+          accessToken: data.access_token,
+          expiresIn: data.expires_in || 3600,
+          hasRefreshToken: !!data.refresh_token,
         };
       }),
   }),

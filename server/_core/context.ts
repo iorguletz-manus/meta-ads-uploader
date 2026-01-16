@@ -60,6 +60,9 @@ async function verifySimpleSession(cookieValue: string | undefined): Promise<Use
         facebookTokenExpiry: null,
         selectedAdAccountId: null,
         enabledAdAccountIds: null,
+        googleAccessToken: null,
+        googleRefreshToken: null,
+        googleTokenExpiry: null,
       };
     }
     return null;

@@ -418,3 +418,16 @@
 - [x] Buton "Retry Failed" pentru fișiere eșuate
 - [x] Thumbnail vizibil în toate step-urile (2, 3, 4, 5)
 - [x] Status indicator per grup (success/error/uploading)
+
+
+## Bug Fix - Round 22
+
+- [x] Google Drive - salvare token în DB cu expirare 60 zile
+- [x] Dezactivare upload Bunny CDN - doar upload direct pe Meta
+- [x] Token Google se salvează în DB și se refolosește la următorul import
+
+
+## Bug Fix - Round 22
+
+- [ ] Google Drive - salvare token în sesiune pentru a evita re-login la fiecare import
+- [ ] Dezactivare upload Bunny CDN - doar upload direct pe Meta
