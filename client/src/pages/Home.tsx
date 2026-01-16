@@ -271,6 +271,7 @@ export default function Home() {
     ADSETS_PREVIEW: 'meta_ads_adsets_preview',
     SHOW_PREVIEW: 'meta_ads_show_preview',
     AD_NAME_COMPOSER: 'meta_ads_ad_name_composer',
+    GOOGLE_DRIVE_LAST_FOLDER: 'meta_ads_google_drive_last_folder',
   };
 
   // Helper to get from localStorage
@@ -674,16 +675,35 @@ export default function Home() {
   const openGooglePicker = (accessToken: string) => {
     const google = (window as any).google;
     
-    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+    // Get last folder from localStorage
+    const lastFolderId = localStorage.getItem(LS_KEYS.GOOGLE_DRIVE_LAST_FOLDER);
+    
+    // Create view for regular Drive with folder navigation
+    const docsView = new google.picker.DocsView(google.picker.ViewId.DOCS)
       .setIncludeFolders(true)
+      .setSelectFolderEnabled(false)
+      .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
+    
+    // If we have a last folder, set it as the parent
+    if (lastFolderId) {
+      docsView.setParent(lastFolderId);
+    }
+    
+    // Create view for Shared Drives
+    const sharedDriveView = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(false)
+      .setEnableDrives(true)
       .setMimeTypes('image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm');
     
     const picker = new google.picker.PickerBuilder()
-      .addView(view)
+      .addView(docsView)
+      .addView(sharedDriveView)
       .setOAuthToken(accessToken)
       .setDeveloperKey(GOOGLE_API_KEY)
       .setCallback((data: any) => handlePickerCallback(data, accessToken))
       .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+      .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
       .setTitle('Select Images or Videos')
       .build();
     
@@ -697,6 +717,13 @@ export default function Home() {
     
     if (data.action === google.picker.Action.PICKED) {
       const files = data.docs;
+      
+      // Save the parent folder ID for next time
+      if (files.length > 0 && files[0].parentId) {
+        localStorage.setItem(LS_KEYS.GOOGLE_DRIVE_LAST_FOLDER, files[0].parentId);
+        console.log('[Google Drive] Saved last folder:', files[0].parentId);
+      }
+      
       toast.info(`Downloading ${files.length} file(s) from Google Drive...`);
       
       for (const file of files) {
@@ -870,7 +897,13 @@ export default function Home() {
   const groupMediaByPrefix = (media: MediaFile[]): Map<string, MediaFile[]> => {
     const groups = new Map<string, MediaFile[]>();
     
-    for (const m of media) {
+    // First, sort media alphabetically by name (handles HOOK1, HOOK2, etc.)
+    const sortedMedia = [...media].sort((a, b) => {
+      // Natural sort to handle numbers correctly (HOOK1 < HOOK2 < HOOK10)
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    
+    for (const m of sortedMedia) {
       const prefix = m.name
         .replace(/\.(jpg|jpeg|png|gif|mp4|mov|webm)$/i, "")
         .replace(/[_-]?(9x16|4x5|1x1|16x9|9_16|4_5|1_1|16_9)$/i, "")
@@ -882,7 +915,14 @@ export default function Home() {
       groups.get(prefix)!.push(m);
     }
     
-    return groups;
+    // Sort the groups alphabetically by prefix
+    const sortedGroups = new Map(
+      Array.from(groups.entries()).sort((a, b) => 
+        a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' })
+      )
+    );
+    
+    return sortedGroups;
   };
 
   // Upload all media to Meta API (get hashes/video IDs)
@@ -1768,13 +1808,30 @@ export default function Home() {
         {/* Step 2: Upload Media */}
         <Card>
           <CardHeader className="py-1 px-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
-                2
-              </span>
-              Upload Media (Images / Videos)
+            <CardTitle className="text-sm flex items-center gap-2 justify-between w-full">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-bold">
+                  2
+                </span>
+                Upload Media (Images / Videos)
+                {mediaPool.length > 0 && (
+                  <span className="text-xs font-normal text-muted-foreground">({mediaPool.length} files)</span>
+                )}
+              </div>
               {mediaPool.length > 0 && (
-                <span className="text-xs font-normal text-muted-foreground">({mediaPool.length} files)</span>
+                <button
+                  className="text-xs text-red-500 hover:text-red-700 hover:underline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('Remove all files from media pool?')) {
+                      setMediaPool([]);
+                      localStorage.removeItem(LS_KEYS.MEDIA_POOL);
+                      toast.success('All files removed');
+                    }
+                  }}
+                >
+                  Remove All
+                </button>
               )}
             </CardTitle>
           </CardHeader>

@@ -427,6 +427,14 @@
 - [x] Token Google se salvează în DB și se refolosește la următorul import
 
 
+## UI Improvements Step 2 - Round 23
+
+- [x] Link "Remove All" în Step 2 pentru a șterge toate fișierele
+- [x] Google Drive - suport pentru Shared Drives
+- [x] Google Drive - salvează ultimul folder vizitat și deschide direct acolo
+- [x] Sortare fișiere alfabetic cu natural sort (HOOK1 < HOOK2 < HOOK10)
+
+
 ## Bug Fix - Round 22
 
 - [ ] Google Drive - salvare token în sesiune pentru a evita re-login la fiecare import
