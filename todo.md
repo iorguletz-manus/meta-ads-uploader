@@ -435,6 +435,14 @@
 - [x] Sortare fișiere alfabetic cu natural sort (HOOK1 < HOOK2 < HOOK10)
 
 
+## Google Drive Server-to-Server - Round 24
+
+- [x] Frontend - Google Drive salvează doar ID-ul fișierului (fără descărcare)
+- [x] Backend - endpoint upload Google Drive → Meta (server-to-server) - exista deja
+- [x] Frontend - handleUploadToMeta detectează fișiere Google Drive și le trimite la server
+- [x] Thumbnail de la Google Drive API pentru preview
+
+
 ## Bug Fix - Round 22
 
 - [ ] Google Drive - salvare token în sesiune pentru a evita re-login la fiecare import

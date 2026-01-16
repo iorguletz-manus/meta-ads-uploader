@@ -89,8 +89,8 @@ const loadGooglePicker = (): Promise<void> => {
 // Types
 interface MediaFile {
   id: string;
-  file: File;
-  preview: string;
+  file?: File; // Optional for Google Drive files
+  preview?: string; // Optional for Google Drive files
   name: string;
   aspectRatio: string;
   base64: string;
@@ -103,7 +103,11 @@ interface MediaFile {
   uploadStatus?: "pending" | "uploading" | "success" | "error"; // Upload status
   uploadProgress?: number; // Upload progress 0-100
   uploadError?: string; // Error message if upload failed
+  // Google Drive fields
   googleDriveFileId?: string; // Google Drive file ID for server-side upload
+  googleDriveMimeType?: string; // MIME type from Google Drive
+  googleDriveThumbnail?: string; // Thumbnail URL from Google Drive
+  isGoogleDrive?: boolean; // Flag to indicate this is a Google Drive file
 }
 
 interface AdData {
@@ -711,7 +715,7 @@ export default function Home() {
     setIsLoadingGoogleDrive(false);
   };
 
-  // Handle picker selection
+  // Handle picker selection - saves only file IDs, no download
   const handlePickerCallback = async (data: any, accessToken: string) => {
     const google = (window as any).google;
     
@@ -724,48 +728,70 @@ export default function Home() {
         console.log('[Google Drive] Saved last folder:', files[0].parentId);
       }
       
-      toast.info(`Downloading ${files.length} file(s) from Google Drive...`);
-      
-      for (const file of files) {
-        try {
-          // Download file from Google Drive
-          const response = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-            {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-            }
-          );
-          
-          if (!response.ok) {
-            throw new Error(`Failed to download ${file.name}`);
-          }
-          
-          const blob = await response.blob();
-          const fileObj = new File([blob], file.name, { type: file.mimeType });
-          
-          // Process the file like a regular upload
-          await processUploadedFile(fileObj);
-          
-        } catch (error) {
-          console.error(`Error downloading ${file.name}:`, error);
-          toast.error(`Failed to download ${file.name}`);
-        }
+      // Save Google access token for server-side upload
+      if (accessToken) {
+        localStorage.setItem('google_access_token_temp', accessToken);
       }
       
-      toast.success(`Successfully imported ${files.length} file(s) from Google Drive`);
+      // Create MediaFile entries without downloading - just save IDs
+      const newMedia: MediaFile[] = [];
+      
+      for (const file of files) {
+        const isVideo = file.mimeType?.startsWith('video/');
+        const isImage = file.mimeType?.startsWith('image/');
+        
+        if (!isVideo && !isImage) {
+          console.log(`Skipping non-media file: ${file.name}`);
+          continue;
+        }
+        
+        // Detect aspect ratio from filename
+        let aspectRatio = "1x1";
+        const name = file.name.toLowerCase();
+        if (name.includes("9x16") || name.includes("9_16")) aspectRatio = "9x16";
+        else if (name.includes("4x5") || name.includes("4_5")) aspectRatio = "4x5";
+        else if (name.includes("16x9") || name.includes("16_9")) aspectRatio = "16x9";
+        else if (name.includes("1x1") || name.includes("1_1")) aspectRatio = "1x1";
+        
+        // Get thumbnail URL from Google Drive
+        const thumbnailUrl = file.thumbnails && file.thumbnails.length > 0 
+          ? file.thumbnails[file.thumbnails.length - 1].url 
+          : file.iconUrl || '';
+        
+        const mediaFile: MediaFile = {
+          id: `gdrive_${file.id}_${Date.now()}`,
+          name: file.name,
+          base64: '', // No base64 for Google Drive files
+          aspectRatio,
+          type: isVideo ? 'video' : 'image',
+          thumbnail: thumbnailUrl,
+          uploadStatus: 'pending',
+          // Google Drive specific fields
+          isGoogleDrive: true,
+          googleDriveFileId: file.id,
+          googleDriveMimeType: file.mimeType,
+          googleDriveThumbnail: thumbnailUrl,
+        };
+        
+        newMedia.push(mediaFile);
+      }
+      
+      if (newMedia.length > 0) {
+        setMediaPool(prev => {
+          const updated = [...prev, ...newMedia];
+          // Save to localStorage (without base64 for Google Drive files)
+          const toSave = updated.map(m => ({
+            ...m,
+            base64: m.isGoogleDrive ? '' : m.base64 // Don't save base64 for Google Drive files
+          }));
+          localStorage.setItem(LS_KEYS.MEDIA_POOL, JSON.stringify(toSave));
+          return updated;
+        });
+        toast.success(`Added ${newMedia.length} file(s) from Google Drive. Click "UPLOAD TO META" to upload.`);
+      }
     } else if (data.action === google.picker.Action.CANCEL) {
       // User cancelled
     }
-  };
-
-  // Process uploaded file from Google Drive - reuses handleFileUpload
-  const processUploadedFile = async (file: File) => {
-    // Create a FileList-like object with single file
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    await handleFileUpload(dataTransfer.files);
   };
 
   // Compress image to reduce size
@@ -944,6 +970,9 @@ export default function Home() {
     let completed = 0;
     let failed = 0;
 
+    // Get Google access token from localStorage (saved during picker callback)
+    const googleAccessToken = localStorage.getItem('google_access_token_temp') || '';
+
     for (let i = 0; i < updatedMedia.length; i++) {
       const media = updatedMedia[i];
       
@@ -959,8 +988,42 @@ export default function Home() {
       setMediaPool([...updatedMedia]);
 
       try {
-        if (media.type === 'image') {
-          // Upload image to Meta
+        // Check if this is a Google Drive file (server-to-server upload)
+        if (media.isGoogleDrive && media.googleDriveFileId) {
+          console.log(`[Upload] Google Drive file: ${media.name} - using server-to-server`);
+          
+          if (!googleAccessToken) {
+            throw new Error('Google access token not found. Please re-import from Google Drive.');
+          }
+          
+          const result = await uploadFromGoogleDriveMutation.mutateAsync({
+            accessToken: fbAccessToken,
+            adAccountId: selectedAdAccount,
+            googleAccessToken: googleAccessToken,
+            fileId: media.googleDriveFileId,
+            fileName: media.name,
+            mimeType: media.googleDriveMimeType || (media.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+          });
+          
+          if (result.type === 'video') {
+            updatedMedia[i] = {
+              ...media,
+              metaVideoId: result.videoId,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            };
+          } else {
+            updatedMedia[i] = {
+              ...media,
+              metaHash: result.hash,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            };
+          }
+          completed++;
+        } else if (media.type === 'image') {
+          // Local file - Upload image to Meta via base64
+          console.log(`[Upload] Local image: ${media.name}`);
           const result = await uploadImageToMetaMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
@@ -976,7 +1039,8 @@ export default function Home() {
           };
           completed++;
         } else {
-          // Upload video to Meta
+          // Local file - Upload video to Meta via base64
+          console.log(`[Upload] Local video: ${media.name}`);
           const result = await uploadVideoToMetaMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
