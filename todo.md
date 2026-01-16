@@ -533,3 +533,22 @@
 - [x] Fix: Video thumbnail afișat 16x9 în loc de 9x16 la Step 4
 - [x] Fix: Eroare 413 la publish video - folosește metaVideoId în loc de base64
 
+
+## Bug Fix - Round 32
+
+### Video Creative Thumbnail
+- [ ] Fix: Meta API cere image_hash sau image_url pentru video creative thumbnail
+
+
+
+## Bug Fixes - Round 17
+
+### Step 4 Video Preview
+- [x] Video player muted by default - add controls bar with play/pause/volume
+- [x] URL field not pre-filled when selecting video template ad
+
+### Logging
+- [x] Fix misleading log "Uploading media and creating ads" - should be "Creating ads" since upload is done in Step 2
+
+### Video Ad Creation
+- [x] Fix image_hash error for video ads - use Meta's auto-generated thumbnail URL (image_url) instead of requiring separate image upload

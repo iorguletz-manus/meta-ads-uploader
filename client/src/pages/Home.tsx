@@ -100,6 +100,7 @@ interface MediaFile {
   thumbnail?: string; // Video thumbnail (first frame)
   metaHash?: string; // Image hash from Meta API
   metaVideoId?: string; // Video ID from Meta API
+  metaThumbnailUrl?: string; // Video thumbnail URL from Meta API
   uploadStatus?: "pending" | "uploading" | "success" | "error"; // Upload status
   uploadProgress?: number; // Upload progress 0-100
   uploadError?: string; // Error message if upload failed
@@ -1320,6 +1321,7 @@ export default function Home() {
             updatedMedia[i] = {
               ...media,
               metaVideoId: result.videoId,
+              metaThumbnailUrl: result.thumbnailUrl,
               uploadStatus: 'success',
               uploadProgress: 100,
             };
@@ -1358,6 +1360,7 @@ export default function Home() {
             updatedMedia[i] = {
               ...media,
               metaVideoId: result.videoId,
+              metaThumbnailUrl: result.thumbnailUrl,
               uploadStatus: 'success',
               uploadProgress: 100,
             };
@@ -1453,6 +1456,7 @@ export default function Home() {
             updatedMedia[i] = {
               ...media,
               metaVideoId: result.videoId,
+              metaThumbnailUrl: result.thumbnailUrl,
               uploadStatus: 'success',
               uploadProgress: 100,
             };
@@ -1469,6 +1473,7 @@ export default function Home() {
             updatedMedia[i] = {
               ...media,
               metaVideoId: result.videoId,
+              metaThumbnailUrl: result.thumbnailUrl,
               thumbnail: result.thumbnailUrl || media.thumbnail,
               uploadStatus: 'success',
               uploadProgress: 100,
@@ -1776,6 +1781,7 @@ export default function Home() {
             // If video already uploaded to Meta, skip base64 processing
             if (m.type === 'video' && m.metaVideoId) {
               console.log(`[Media Processing]   - Using pre-uploaded video ID: ${m.metaVideoId}`);
+              console.log(`[Media Processing]   - metaThumbnailUrl: ${m.metaThumbnailUrl || 'none'}`);
               return {
                 filename: m.name,
                 base64: '', // No need for base64, we have metaVideoId
@@ -1783,6 +1789,7 @@ export default function Home() {
                 aspectRatio: m.aspectRatio,
                 metaHash: m.metaHash,
                 metaVideoId: m.metaVideoId,
+                metaThumbnailUrl: m.metaThumbnailUrl,
               };
             }
             
@@ -1839,6 +1846,7 @@ export default function Home() {
               aspectRatio: m.aspectRatio,
               metaHash: m.metaHash, // Pre-uploaded image hash
               metaVideoId: m.metaVideoId, // Pre-uploaded video ID
+              metaThumbnailUrl: m.metaThumbnailUrl, // Pre-fetched video thumbnail URL
             };
           }));
 
@@ -1851,7 +1859,7 @@ export default function Home() {
           };
         }));
 
-        addProgressLog(`  → Uploading media and creating ads via Meta API...`);
+        addProgressLog(`  → Creating ads via Meta API...`);
         
         const result = await batchCreateAdsMutation.mutateAsync({
           accessToken: fbAccessToken,
@@ -1966,6 +1974,7 @@ export default function Home() {
             aspectRatio: m.aspectRatio,
             metaHash: m.metaHash, // Pre-uploaded image hash
             metaVideoId: m.metaVideoId, // Pre-uploaded video ID
+            metaThumbnailUrl: m.metaThumbnailUrl, // Pre-fetched video thumbnail URL
           })),
         };
       });
@@ -2850,7 +2859,6 @@ export default function Home() {
                                             src={m.preview}
                                             className="w-full h-full object-cover"
                                             controls
-                                            muted
                                           />
                                         )}
                                       </div>

@@ -15,6 +15,26 @@ const FIXED_PASSWORD = "cinema10";
 // Meta API base URL
 const META_API_BASE = "https://graph.facebook.com/v24.0";
 
+// Helper to get video thumbnail URL from Meta
+async function getVideoThumbnailUrl(videoId: string, accessToken: string): Promise<string | null> {
+  try {
+    console.log(`[getVideoThumbnail] Fetching thumbnail for video ${videoId}...`);
+    const response = await fetch(
+      `${META_API_BASE}/${videoId}?fields=picture&access_token=${accessToken}`
+    );
+    const data = await response.json();
+    if (data.error) {
+      console.error(`[getVideoThumbnail] Error:`, data.error.message);
+      return null;
+    }
+    console.log(`[getVideoThumbnail] Got thumbnail URL:`, data.picture);
+    return data.picture || null;
+  } catch (error: any) {
+    console.error(`[getVideoThumbnail] Failed:`, error.message);
+    return null;
+  }
+}
+
 // Facebook App credentials (from ENV)
 const FB_APP_ID = process.env.VITE_FACEBOOK_APP_ID;
 const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
@@ -306,9 +326,15 @@ export const appRouter = router({
           }
           
           console.log("[uploadVideoToMeta] Success! Video ID:", data.id);
+          
+          // Get video thumbnail URL from Meta
+          const thumbnailUrl = await getVideoThumbnailUrl(data.id, input.accessToken);
+          console.log("[uploadVideoToMeta] Thumbnail URL:", thumbnailUrl);
+          
           return { 
             success: true, 
             videoId: data.id,
+            thumbnailUrl: thumbnailUrl || undefined,
             fileName: input.fileName 
           };
         } catch (error: any) {
@@ -441,10 +467,15 @@ export const appRouter = router({
             console.log("[uploadFromGoogleDrive] ====== SUCCESS ======");
             console.log("[uploadFromGoogleDrive] Video uploaded! ID:", data.id);
             console.log("[uploadFromGoogleDrive] Total time:", totalTime, "ms (", Math.round(totalTime / 1000), "s)");
+            
+            // Get video thumbnail URL from Meta
+            const thumbnailUrl = await getVideoThumbnailUrl(data.id, input.accessToken);
+            console.log("[uploadFromGoogleDrive] Thumbnail URL:", thumbnailUrl);
             console.log("=".repeat(80) + "\n");
             return { 
               success: true, 
               videoId: data.id,
+              thumbnailUrl: thumbnailUrl || undefined,
               fileName: input.fileName,
               type: "video" as const
             };
@@ -542,11 +573,16 @@ export const appRouter = router({
             console.log("[uploadFromPublicUrl] ====== SUCCESS ======");
             console.log("[uploadFromPublicUrl] Video ID:", data.id);
             console.log("[uploadFromPublicUrl] Total time:", totalTime, "ms");
+            
+            // Get video thumbnail URL from Meta
+            const thumbnailUrl = await getVideoThumbnailUrl(data.id, input.accessToken);
+            console.log("[uploadFromPublicUrl] Thumbnail URL:", thumbnailUrl);
             console.log("=".repeat(80) + "\n");
             
             return {
               success: true,
               videoId: data.id,
+              thumbnailUrl: thumbnailUrl || undefined,
               fileName: input.fileName,
               type: "video" as const
             };
@@ -714,6 +750,14 @@ export const appRouter = router({
           primaryText = linkData.message || "";
           headline = linkData.name || linkData.caption || "";
           url = linkData.link || "";
+        } else if (ad.creative?.object_story_spec?.video_data) {
+          // Video ad - extract from video_data
+          const videoData = ad.creative.object_story_spec.video_data;
+          primaryText = videoData.message || "";
+          headline = videoData.title || videoData.link_description || "";
+          // URL is in call_to_action.value.link
+          url = videoData.call_to_action?.value?.link || "";
+          console.log("[getAdDetails] Video ad detected, extracted URL:", url);
         } else if (ad.creative?.asset_feed_spec) {
           const assetFeed = ad.creative.asset_feed_spec;
           if (assetFeed.bodies && assetFeed.bodies.length > 0) {
@@ -1147,6 +1191,7 @@ export const appRouter = router({
             type: z.enum(["image", "video"]),
             metaHash: z.string().optional(), // Pre-uploaded image hash
             metaVideoId: z.string().optional(), // Pre-uploaded video ID
+            metaThumbnailUrl: z.string().optional(), // Pre-fetched video thumbnail URL from Meta
           })),
         })),
       }))
@@ -1411,7 +1456,7 @@ export const appRouter = router({
             
             // STEP 4b: Upload videos
             console.log(`\n[STEP 4.${adIndex}b] -------- UPLOADING VIDEOS --------`);
-            const uploadedVideos: Array<{ id: string; aspectRatio: string }> = [];
+            const uploadedVideos: Array<{ id: string; aspectRatio: string; thumbnailUrl?: string }> = [];
             let videoIndex = 0;
             
             for (const video of videos) {
@@ -1421,9 +1466,11 @@ export const appRouter = router({
               // If we already have a metaVideoId from pre-upload, use it directly
               if (video.metaVideoId) {
                 console.log(`[STEP 4.${adIndex}b] Using pre-uploaded video ID: ${video.metaVideoId}`);
+                console.log(`[STEP 4.${adIndex}b] Pre-uploaded thumbnail URL: ${video.metaThumbnailUrl || 'none'}`);
                 uploadedVideos.push({
                   id: video.metaVideoId,
                   aspectRatio: video.aspectRatio,
+                  thumbnailUrl: video.metaThumbnailUrl,
                 });
                 continue;
               }
@@ -1505,6 +1552,19 @@ export const appRouter = router({
             
             if (uploadedVideos.length > 0) {
               console.log(`[STEP 4.${adIndex}d] Creating VIDEO creative`);
+              
+              // Determine thumbnail source: prefer image_hash if we have uploaded images, otherwise use image_url from Meta thumbnail
+              const thumbnailData: Record<string, string> = {};
+              if (uploadedImages.length > 0) {
+                thumbnailData.image_hash = uploadedImages[0].hash;
+                console.log(`[STEP 4.${adIndex}d] Using uploaded image as thumbnail, hash: ${uploadedImages[0].hash}`);
+              } else if (uploadedVideos[0].thumbnailUrl) {
+                thumbnailData.image_url = uploadedVideos[0].thumbnailUrl;
+                console.log(`[STEP 4.${adIndex}d] Using Meta video thumbnail URL: ${uploadedVideos[0].thumbnailUrl}`);
+              } else {
+                console.warn(`[STEP 4.${adIndex}d] WARNING: No thumbnail available for video ad!`);
+              }
+              
               // Video creative
               creativeData = {
                 name: `${ad.adName}_creative`,
@@ -1519,8 +1579,7 @@ export const appRouter = router({
                       type: "LEARN_MORE",
                       value: { link: ad.url }
                     },
-                    // Use first image as thumbnail if available
-                    ...(uploadedImages.length > 0 && { image_hash: uploadedImages[0].hash }),
+                    ...thumbnailData,
                   },
                 }),
               };
