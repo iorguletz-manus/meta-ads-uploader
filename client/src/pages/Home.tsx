@@ -1662,7 +1662,7 @@ export default function Home() {
           name: adsetName,
           ads,
           sharedBody: "",
-          sharedHeadline: "",
+          sharedHeadline: adDetailsQuery.data?.headline || "",
           sharedUrl: adDetailsQuery.data?.url || "",
           status: "idle",
           isExpanded: true,
@@ -2966,10 +2966,10 @@ export default function Home() {
                         ))}
 
                         {/* Shared fields */}
-                        <div className="border-t pt-2 mt-2 space-y-1.5" style={{ maxWidth: FB_TEXT_WIDTH }}>
+                        <div className="border-t pt-2 mt-2 space-y-1.5">
                           {/* Shared Body for image ads */}
                           {adSet.mediaType !== "video" && (
-                            <div>
+                            <div style={{ maxWidth: FB_TEXT_WIDTH }}>
                               <div className="flex items-center justify-between">
                                 <Label className="text-[10px] text-muted-foreground">Body (shared)</Label>
                                 <button
@@ -2995,13 +2995,13 @@ export default function Home() {
                               />
                             </div>
                           )}
+                          {/* Headline and URL - full width */}
                           <div>
                             <Label className="text-[10px] text-muted-foreground">Headline (shared)</Label>
                             <Input
                               value={adSet.sharedHeadline}
                               onChange={(e) => updateAdSet(adSet.id, "sharedHeadline", e.target.value)}
-                              className="h-6 text-xs w-full"
-                              style={{ width: "100%" }}
+                              className="h-6 text-xs"
                               placeholder="Headline"
                             />
                           </div>
@@ -3010,8 +3010,7 @@ export default function Home() {
                             <Input
                               value={adSet.sharedUrl}
                               onChange={(e) => updateAdSet(adSet.id, "sharedUrl", e.target.value)}
-                              className="h-6 text-xs w-full"
-                              style={{ width: "100%" }}
+                              className="h-6 text-xs"
                               placeholder="https://..."
                             />
                           </div>

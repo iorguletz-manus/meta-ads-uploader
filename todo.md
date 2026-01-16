@@ -611,3 +611,18 @@
 ### Meta API Fixes
 - [x] Remove deprecated degrees_of_freedom_spec (standard_enhancements no longer supported)
 - [x] Keep only contextual_multi_ads for disabling Multi-advertiser ads
+
+
+## Bug Fixes - Round 23
+
+### Step 4 Input Widths
+- [x] Fix Headline and URL inputs to be same width as video/textarea (full width)
+
+### Advantage+ Creative Enhancements
+- [ ] Disable Visual touch-ups (image_touchups) - Meta API deprecated degrees_of_freedom_spec
+- [ ] Disable Add video effects (cv_transformation?) - Meta API deprecated degrees_of_freedom_spec
+- [ ] Disable Enhance CTA (enhance_cta) - Meta API deprecated degrees_of_freedom_spec
+- NOTE: Meta has deprecated degrees_of_freedom_spec and no longer accepts these settings via API
+
+### Template Copy
+- [x] Fix headline not copying from template ad - now uses adDetailsQuery.data.headline
