@@ -2599,7 +2599,13 @@ export default function Home() {
                                         style={{ width: `${m.uploadProgress || 0}%` }}
                                       />
                                     </div>
-                                    <span className="text-[8px] text-white font-medium">{m.uploadProgress || 0}%</span>
+                                    <span className="text-[7px] text-white font-medium">
+                                      {(m.uploadProgress || 0) < 50 
+                                        ? `Uploading ${m.uploadProgress || 0}%` 
+                                        : (m.uploadProgress || 0) < 100 
+                                          ? 'Processing at Meta...' 
+                                          : 'Done!'}
+                                    </span>
                                   </div>
                                 )}
                                 {m.uploadStatus === 'success' && (
@@ -2994,7 +3000,8 @@ export default function Home() {
                             <Input
                               value={adSet.sharedHeadline}
                               onChange={(e) => updateAdSet(adSet.id, "sharedHeadline", e.target.value)}
-                              className="h-6 text-xs"
+                              className="h-6 text-xs w-full"
+                              style={{ width: "100%" }}
                               placeholder="Headline"
                             />
                           </div>
@@ -3003,7 +3010,8 @@ export default function Home() {
                             <Input
                               value={adSet.sharedUrl}
                               onChange={(e) => updateAdSet(adSet.id, "sharedUrl", e.target.value)}
-                              className="h-6 text-xs"
+                              className="h-6 text-xs w-full"
+                              style={{ width: "100%" }}
                               placeholder="https://..."
                             />
                           </div>

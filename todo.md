@@ -577,3 +577,37 @@
 - [x] Multi-advertiser ads - ALWAYS OFF
 - [x] Call to action - ALWAYS LEARN_MORE (already hardcoded)
 - [x] Instagram account - ALWAYS "Use Facebook Page" (automatic - we don't send instagram_actor_id)
+
+
+## UI/UX Improvements - Round 22
+
+### Step 4 Layout
+- [ ] Make URL and Headline inputs same width as video preview and Primary Text textarea
+
+### Upload Progress
+- [ ] Make Bunny upload progress bar REAL (not artificial) using XMLHttpRequest progress events
+
+### Processing Indicators
+- [ ] Add "Processing video at Meta..." indicator when waiting for thumbnail
+
+### Error Handling
+- [ ] Add auto-retry for ads that fail (max 2-3 retries, then stop with error)
+
+
+## UI/UX Improvements - Round 22
+
+### Step 4 Input Widths
+- [x] Make URL and Headline inputs same width as video/textarea (100% width)
+
+### Upload Progress Indicator
+- [x] Add indicator "Uploading X%" when progress < 50%
+- [x] Add indicator "Processing at Meta..." when progress >= 50%
+
+### Auto-Retry for Failed Ads
+- [x] Add auto-retry for failed ads (max 2 attempts)
+- [x] 3 second delay between retry attempts
+- [x] Log retry attempts in console
+
+### Meta API Fixes
+- [x] Remove deprecated degrees_of_freedom_spec (standard_enhancements no longer supported)
+- [x] Keep only contextual_multi_ads for disabling Multi-advertiser ads

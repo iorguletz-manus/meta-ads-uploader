@@ -1152,20 +1152,7 @@ export const appRouter = router({
             name: `${input.adName}_creative`,
             object_story_spec: JSON.stringify(objectStorySpec),
             asset_feed_spec: JSON.stringify(assetFeedSpec),
-            // Disable ALL Advantage+ creative enhancements
-            degrees_of_freedom_spec: JSON.stringify({
-              creative_features_spec: {
-                standard_enhancements: { enroll_status: "OPT_OUT" },
-                image_templates: { enroll_status: "OPT_OUT" },
-                image_touchups: { enroll_status: "OPT_OUT" },
-                text_optimizations: { enroll_status: "OPT_OUT" },
-                inline_comment: { enroll_status: "OPT_OUT" },
-                image_brightness_and_contrast: { enroll_status: "OPT_OUT" },
-                enhance_cta: { enroll_status: "OPT_OUT" },
-                advantage_plus_creative: { enroll_status: "OPT_OUT" },
-              },
-            }),
-            // Disable Multi-advertiser ads
+            // Disable Multi-advertiser ads (degrees_of_freedom_spec removed - deprecated by Meta)
             contextual_multi_ads: JSON.stringify({
               enroll_status: "OPT_OUT",
             }),
@@ -1176,20 +1163,7 @@ export const appRouter = router({
           creativeData = {
             name: `${input.adName}_creative`,
             object_story_spec: JSON.stringify(objectStorySpec),
-            // Disable ALL Advantage+ creative enhancements
-            degrees_of_freedom_spec: JSON.stringify({
-              creative_features_spec: {
-                standard_enhancements: { enroll_status: "OPT_OUT" },
-                image_templates: { enroll_status: "OPT_OUT" },
-                image_touchups: { enroll_status: "OPT_OUT" },
-                text_optimizations: { enroll_status: "OPT_OUT" },
-                inline_comment: { enroll_status: "OPT_OUT" },
-                image_brightness_and_contrast: { enroll_status: "OPT_OUT" },
-                enhance_cta: { enroll_status: "OPT_OUT" },
-                advantage_plus_creative: { enroll_status: "OPT_OUT" },
-              },
-            }),
-            // Disable Multi-advertiser ads
+            // Disable Multi-advertiser ads (degrees_of_freedom_spec removed - deprecated by Meta)
             contextual_multi_ads: JSON.stringify({
               enroll_status: "OPT_OUT",
             }),
@@ -1463,7 +1437,19 @@ export const appRouter = router({
         
         for (const ad of input.ads) {
           adIndex++;
+          
+          // Retry logic - max 2 attempts per ad
+          const MAX_RETRIES = 2;
+          let lastError = '';
+          let adSuccess = false;
+          
+          for (let attempt = 1; attempt <= MAX_RETRIES && !adSuccess; attempt++) {
           try {
+            if (attempt > 1) {
+              console.log(`\n[STEP 4.${adIndex}] RETRY ATTEMPT ${attempt}/${MAX_RETRIES}`);
+              // Wait 3 seconds before retry
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
             console.log("\n" + "#".repeat(120));
             console.log(`[STEP 4.${adIndex}] ######## PROCESSING AD ${adIndex}/${input.ads.length}: ${ad.adName} ########`);
             console.log(`[STEP 4.${adIndex}] Ad Name: ${ad.adName}`);
@@ -1703,20 +1689,7 @@ export const appRouter = router({
                     ...thumbnailData,
                   },
                 }),
-                // Disable ALL Advantage+ creative enhancements
-                degrees_of_freedom_spec: JSON.stringify({
-                  creative_features_spec: {
-                    standard_enhancements: { enroll_status: "OPT_OUT" },
-                    image_templates: { enroll_status: "OPT_OUT" },
-                    image_touchups: { enroll_status: "OPT_OUT" },
-                    text_optimizations: { enroll_status: "OPT_OUT" },
-                    inline_comment: { enroll_status: "OPT_OUT" },
-                    image_brightness_and_contrast: { enroll_status: "OPT_OUT" },
-                    enhance_cta: { enroll_status: "OPT_OUT" },
-                    advantage_plus_creative: { enroll_status: "OPT_OUT" },
-                  },
-                }),
-                // Disable Multi-advertiser ads
+                // Disable Multi-advertiser ads (degrees_of_freedom_spec removed - deprecated by Meta)
                 contextual_multi_ads: JSON.stringify({
                   enroll_status: "OPT_OUT",
                 }),
@@ -1739,20 +1712,7 @@ export const appRouter = router({
                     },
                   },
                 }),
-                // Disable ALL Advantage+ creative enhancements
-                degrees_of_freedom_spec: JSON.stringify({
-                  creative_features_spec: {
-                    standard_enhancements: { enroll_status: "OPT_OUT" },
-                    image_templates: { enroll_status: "OPT_OUT" },
-                    image_touchups: { enroll_status: "OPT_OUT" },
-                    text_optimizations: { enroll_status: "OPT_OUT" },
-                    inline_comment: { enroll_status: "OPT_OUT" },
-                    image_brightness_and_contrast: { enroll_status: "OPT_OUT" },
-                    enhance_cta: { enroll_status: "OPT_OUT" },
-                    advantage_plus_creative: { enroll_status: "OPT_OUT" },
-                  },
-                }),
-                // Disable Multi-advertiser ads
+                // Disable Multi-advertiser ads (degrees_of_freedom_spec removed - deprecated by Meta)
                 contextual_multi_ads: JSON.stringify({
                   enroll_status: "OPT_OUT",
                 }),
@@ -1914,17 +1874,28 @@ export const appRouter = router({
             console.log(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} COMPLETED SUCCESSFULLY ########\n`);
             
             results.push({ adName: ad.adName, success: true, adId: newAd.id });
+            adSuccess = true; // Mark as successful to exit retry loop
             
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : "Unknown error";
-            console.error(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} FAILED ########`);
+            lastError = errorMsg;
+            console.error(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} ATTEMPT ${attempt} FAILED ########`);
             console.error(`[STEP 4.${adIndex}] Error: ${errorMsg}`);
             console.error(`[STEP 4.${adIndex}] Full error:`, error);
             
+            if (attempt < MAX_RETRIES) {
+              console.log(`[STEP 4.${adIndex}] Will retry in 3 seconds...`);
+            }
+          }
+          } // End of retry loop
+          
+          // If all retries failed, add to results
+          if (!adSuccess) {
+            console.error(`[STEP 4.${adIndex}] ######## AD ${adIndex} FAILED AFTER ${MAX_RETRIES} ATTEMPTS ########`);
             results.push({ 
               adName: ad.adName, 
               success: false, 
-              error: errorMsg
+              error: `Failed after ${MAX_RETRIES} attempts: ${lastError}`
             });
           }
         }
