@@ -788,15 +788,18 @@ export const appRouter = router({
     getAdDetails: protectedProcedure
       .input(z.object({ accessToken: z.string(), adId: z.string() }))
       .query(async ({ input }) => {
-        // Get ad with creative
+        // Get ad with creative - including degrees_of_freedom_spec and contextual_multi_ads
         const ad = await metaApiRequest(
-          `/${input.adId}?fields=id,name,status,creative{id,name,object_story_spec,asset_feed_spec}`,
+          `/${input.adId}?fields=id,name,status,creative{id,name,object_story_spec,asset_feed_spec,degrees_of_freedom_spec,contextual_multi_ads,call_to_action_type}`,
           input.accessToken
         );
+        
+        console.log("[getAdDetails] Full creative response:", JSON.stringify(ad.creative, null, 2));
         
         let primaryText = "";
         let headline = "";
         let url = "";
+        let callToActionType = "LEARN_MORE"; // Default
         
         // Extract text from creative
         if (ad.creative?.object_story_spec?.link_data) {
@@ -804,6 +807,10 @@ export const appRouter = router({
           primaryText = linkData.message || "";
           headline = linkData.name || linkData.caption || "";
           url = linkData.link || "";
+          // Extract CTA type from link_data
+          if (linkData.call_to_action?.type) {
+            callToActionType = linkData.call_to_action.type;
+          }
         } else if (ad.creative?.object_story_spec?.video_data) {
           // Video ad - extract from video_data
           const videoData = ad.creative.object_story_spec.video_data;
@@ -811,6 +818,10 @@ export const appRouter = router({
           headline = videoData.title || videoData.link_description || "";
           // URL is in call_to_action.value.link
           url = videoData.call_to_action?.value?.link || "";
+          // Extract CTA type from video_data
+          if (videoData.call_to_action?.type) {
+            callToActionType = videoData.call_to_action.type;
+          }
           console.log("[getAdDetails] Video ad detected, extracted URL:", url);
         } else if (ad.creative?.asset_feed_spec) {
           const assetFeed = ad.creative.asset_feed_spec;
@@ -823,7 +834,25 @@ export const appRouter = router({
           if (assetFeed.link_urls && assetFeed.link_urls.length > 0) {
             url = assetFeed.link_urls[0].website_url || "";
           }
+          // Extract CTA type from asset_feed_spec
+          if (assetFeed.call_to_action_types && assetFeed.call_to_action_types.length > 0) {
+            callToActionType = assetFeed.call_to_action_types[0];
+          }
         }
+        
+        // Use call_to_action_type from creative level if available
+        if (ad.creative?.call_to_action_type) {
+          callToActionType = ad.creative.call_to_action_type;
+        }
+        
+        // Extract Advantage+ and Multi-advertiser settings
+        const degreesOfFreedomSpec = ad.creative?.degrees_of_freedom_spec || null;
+        const contextualMultiAds = ad.creative?.contextual_multi_ads || null;
+        
+        console.log("[getAdDetails] Extracted settings:");
+        console.log("[getAdDetails]   callToActionType:", callToActionType);
+        console.log("[getAdDetails]   degreesOfFreedomSpec:", JSON.stringify(degreesOfFreedomSpec));
+        console.log("[getAdDetails]   contextualMultiAds:", JSON.stringify(contextualMultiAds));
         
         return {
           id: ad.id,
@@ -833,6 +862,10 @@ export const appRouter = router({
           primaryText,
           headline,
           url,
+          // New fields for copying template settings
+          callToActionType,
+          degreesOfFreedomSpec,
+          contextualMultiAds,
         };
       }),
 

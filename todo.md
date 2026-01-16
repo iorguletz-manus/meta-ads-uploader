@@ -569,3 +569,11 @@
 
 ### Video Thumbnails
 - [x] Fix grey thumbnails - now waits for video processing before fetching thumbnail (polling up to 60s)
+
+## Feature - Round 20: Hardcoded Ad Settings
+
+### Requirements (always hardcoded, not copied from template)
+- [x] Advantage+ creative enhancements - ALWAYS OFF
+- [x] Multi-advertiser ads - ALWAYS OFF
+- [x] Call to action - ALWAYS LEARN_MORE (already hardcoded)
+- [x] Instagram account - ALWAYS "Use Facebook Page" (automatic - we don't send instagram_actor_id)
