@@ -670,3 +670,23 @@
 - [x] Show link count and download progress
 - [x] Add downloaded files to media pool with Bunny CDN URLs
 - [x] Write vitest tests for the new endpoint (6 tests passing)
+
+
+## Feature - Round 27: Bunny Fetch (Direct URL Import)
+
+### Goal
+- Add "#4 Bunny Fetch" button that uses Bunny Stream's videos/fetch endpoint
+- Server only sends Google Drive URL to Bunny - no bytes proxied through our server
+- More efficient and cheaper - Bunny downloads directly from source
+
+### Tasks
+- [x] Add Bunny Stream API credentials to bunnyStorage.ts (env vars: BUNNY_STREAM_API_KEY, BUNNY_STREAM_LIBRARY_ID, BUNNY_STREAM_CDN_HOSTNAME)
+- [x] Add backend endpoint `google.bunnyFetchFiles` that calls Bunny's videos/fetch API
+- [x] Backend extracts file IDs and constructs Google Drive download URLs (`/uc?export=download&id=FILE_ID`)
+- [x] Backend sends URLs to Bunny Stream fetch endpoint
+- [x] Add `bunnyStreamFetchVideo`, `bunnyStreamWaitForVideo`, `bunnyStreamGetVideoStatus` helper functions
+- [x] Add "#4 Bunny Fetch" button in Step 2 (purple color)
+- [x] Add dialog with textarea for pasting links (auto-arranges comma-separated to newlines)
+- [x] Poll Bunny for video status until ready (waitForProcessing option)
+- [x] Add completed videos to media pool with directPlayUrl and thumbnailUrl
+- [x] Write vitest tests for the new endpoint (7 tests passing)

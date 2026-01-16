@@ -666,6 +666,12 @@ export default function Home() {
   const [publicLinksText, setPublicLinksText] = useState('');
   const [isLoadingPublicLinks, setIsLoadingPublicLinks] = useState(false);
   const [publicLinksProgress, setPublicLinksProgress] = useState<{current: number, total: number, fileName: string} | null>(null);
+  
+  // Google Drive #4 - Bunny Fetch method (Bunny downloads directly from Google Drive)
+  const [showBunnyFetchInput, setShowBunnyFetchInput] = useState(false);
+  const [bunnyFetchText, setBunnyFetchText] = useState('');
+  const [isLoadingBunnyFetch, setIsLoadingBunnyFetch] = useState(false);
+  const [bunnyFetchProgress, setBunnyFetchProgress] = useState<{current: number, total: number, fileName: string} | null>(null);
 
   // Google Drive Connect - opens picker
   // Exchange Google auth code mutation
@@ -1193,6 +1199,92 @@ export default function Home() {
     }
     
     console.log("[PublicLinks] ====== END ======");
+  };
+
+  // Handle Bunny Fetch import (#4) - Bunny downloads directly from Google Drive
+  const handleBunnyFetchImport = async () => {
+    const links = bunnyFetchText
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0 && l.includes('drive.google.com'));
+    
+    if (links.length === 0) {
+      toast.error("No valid Google Drive links found");
+      return;
+    }
+    
+    console.log("[BunnyFetch] ====== START ======");
+    console.log("[BunnyFetch] Total links:", links.length);
+    
+    setIsLoadingBunnyFetch(true);
+    setBunnyFetchProgress({ current: 0, total: links.length, fileName: 'Starting...' });
+    
+    try {
+      // Call backend - Bunny will fetch directly from Google Drive
+      // waitForProcessing: true means we wait for Bunny to finish processing
+      const result = await (trpc as any).google.bunnyFetchFiles.mutate({ 
+        links,
+        waitForProcessing: true // Wait for videos to be ready
+      });
+      
+      console.log("[BunnyFetch] Backend result:", result);
+      
+      if (!result.results || result.results.length === 0) {
+        toast.error("No files were processed");
+        return;
+      }
+      
+      // Add successful files to media pool
+      const successfulFiles = result.results.filter((r: any) => r.success);
+      const failedFiles = result.results.filter((r: any) => !r.success);
+      
+      if (successfulFiles.length > 0) {
+        const newMedia: MediaFile[] = successfulFiles.map((file: any) => ({
+          id: `bunnystream_${file.videoGuid}_${Date.now()}`,
+          name: file.fileName,
+          base64: '',
+          aspectRatio: '9x16', // Default for videos, Bunny Stream is primarily for videos
+          type: 'video' as const,
+          cdnUrl: file.directPlayUrl,
+          preview: file.directPlayUrl,
+          thumbnail: file.thumbnailUrl || file.directPlayUrl,
+          uploadStatus: 'success' as const,
+          // Store Bunny Stream specific info
+          metaVideoId: file.videoGuid, // We can use this field to store the Bunny GUID
+        }));
+        
+        setMediaPool(prev => {
+          const updated = [...prev, ...newMedia];
+          const toSave = updated.map(m => ({
+            ...m,
+            base64: ''
+          }));
+          localStorage.setItem(LS_KEYS.MEDIA_POOL, JSON.stringify(toSave));
+          return updated;
+        });
+        
+        toast.success(`Imported ${successfulFiles.length} video(s) via Bunny Stream!`);
+      }
+      
+      if (failedFiles.length > 0) {
+        console.error("[BunnyFetch] Failed files:", failedFiles);
+        const errorMsgs = failedFiles.map((f: any) => f.error || 'Unknown error').join(', ');
+        toast.error(`${failedFiles.length} file(s) failed: ${errorMsgs}`);
+      }
+      
+      // Clear input and close
+      setBunnyFetchText('');
+      setShowBunnyFetchInput(false);
+      
+    } catch (error: any) {
+      console.error("[BunnyFetch] Error:", error);
+      toast.error(error.message || "Failed to import via Bunny Stream");
+    } finally {
+      setIsLoadingBunnyFetch(false);
+      setBunnyFetchProgress(null);
+    }
+    
+    console.log("[BunnyFetch] ====== END ======");
   };
 
   // Compress image to reduce size
@@ -2616,6 +2708,22 @@ export default function Home() {
                 </svg>
                 <span>#3 Public Links</span>
               </button>
+              
+              {/* NEW: Bunny Fetch button #4 */}
+              <button
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-purple-100 hover:bg-purple-200 transition-colors text-xs text-purple-700 hover:text-purple-800 border border-purple-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowBunnyFetchInput(!showBunnyFetchInput);
+                }}
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 17l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span>#4 Bunny Fetch</span>
+              </button>
             </div>
             
             {/* Public folder URL input */}
@@ -2704,6 +2812,63 @@ export default function Home() {
                   </div>
                 </div>
                 <p className="text-[10px] text-blue-600">Files must be publicly accessible ("Anyone with the link can view"). Server will download directly to Bunny CDN.</p>
+              </div>
+            )}
+            
+            {/* Bunny Fetch input #4 */}
+            {showBunnyFetchInput && (
+              <div className="mb-2 p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-2">
+                <p className="text-xs text-purple-700 font-medium">Paste Google Drive file links (Bunny will download directly):</p>
+                <textarea
+                  value={bunnyFetchText}
+                  onChange={(e) => {
+                    // Auto-arrange: replace commas with newlines
+                    const text = e.target.value;
+                    const arranged = text.includes(',') && !text.includes('\n') 
+                      ? text.split(',').map(s => s.trim()).filter(s => s).join('\n')
+                      : text;
+                    setBunnyFetchText(arranged);
+                  }}
+                  placeholder="https://drive.google.com/file/d/FILE_ID_1/view\nhttps://drive.google.com/file/d/FILE_ID_2/view\n..."
+                  className="w-full px-2 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono h-32 resize-none"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] text-purple-600">
+                    {bunnyFetchText.split('\n').filter(l => l.trim()).length} links detected
+                    {bunnyFetchProgress && (
+                      <span className="ml-2 text-purple-800 font-medium">
+                        • Processing {bunnyFetchProgress.current}/{bunnyFetchProgress.total}: {bunnyFetchProgress.fileName}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setBunnyFetchText('');
+                      }}
+                      className="px-2 py-1 text-purple-600 text-xs rounded-md hover:bg-purple-100"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleBunnyFetchImport();
+                      }}
+                      disabled={isLoadingBunnyFetch || !bunnyFetchText.trim()}
+                      className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      {isLoadingBunnyFetch ? (
+                        <><Loader2 className="h-3 w-3 animate-spin" /> Fetching...</>
+                      ) : (
+                        'Bunny Fetch'
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-purple-600">⚡ Zero server bandwidth - Bunny downloads directly from Google Drive. Requires Bunny Stream credentials.</p>
               </div>
             )}
 

@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings, saveGoogleToken, getGoogleToken, clearGoogleToken, refreshGoogleAccessToken } from "./db";
-import { uploadToBunny, deleteFromBunny, uploadBufferToBunny } from "./bunnyStorage";
+import { uploadToBunny, deleteFromBunny, uploadBufferToBunny, bunnyStreamFetchVideo, bunnyStreamWaitForVideo, isBunnyStreamConfigured } from "./bunnyStorage";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -2314,6 +2314,162 @@ export const appRouter = router({
         console.log(`[downloadPublicFiles] Success: ${results.filter(r => r.success).length}/${results.length}`);
         
         return { results };
+      }),
+
+    // Fetch files from Google Drive URLs using Bunny Stream's videos/fetch endpoint
+    // Server only sends URL to Bunny - no bytes proxied through our server
+    bunnyFetchFiles: protectedProcedure
+      .input(z.object({
+        links: z.array(z.string()),
+        waitForProcessing: z.boolean().optional().default(false),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        console.log("[bunnyFetchFiles] ====== START ======");
+        console.log("[bunnyFetchFiles] Total links:", input.links.length);
+        console.log("[bunnyFetchFiles] Wait for processing:", input.waitForProcessing);
+        
+        if (!ctx.user) {
+          throw new Error("Not authenticated");
+        }
+        
+        // Check if Bunny Stream is configured
+        if (!isBunnyStreamConfigured()) {
+          throw new Error("Bunny Stream is not configured. Please set BUNNY_STREAM_API_KEY, BUNNY_STREAM_LIBRARY_ID, and BUNNY_STREAM_CDN_HOSTNAME environment variables.");
+        }
+        
+        const results: Array<{
+          success: boolean;
+          fileName: string;
+          videoGuid?: string;
+          directPlayUrl?: string;
+          thumbnailUrl?: string;
+          status?: string;
+          error?: string;
+        }> = [];
+        
+        const GOOGLE_API_KEY = process.env.VITE_GOOGLE_API_KEY;
+        
+        for (let i = 0; i < input.links.length; i++) {
+          const link = input.links[i].trim();
+          console.log(`[bunnyFetchFiles] Processing ${i + 1}/${input.links.length}: ${link}`);
+          
+          try {
+            // Extract file ID from various Google Drive URL formats
+            let fileId: string | null = null;
+            
+            const fileIdMatch = link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (fileIdMatch) {
+              fileId = fileIdMatch[1];
+            } else {
+              const idParamMatch = link.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+              if (idParamMatch) {
+                fileId = idParamMatch[1];
+              }
+            }
+            
+            if (!fileId) {
+              console.error(`[bunnyFetchFiles] Could not extract file ID from: ${link}`);
+              results.push({
+                success: false,
+                fileName: 'unknown',
+                error: 'Invalid Google Drive URL format',
+              });
+              continue;
+            }
+            
+            console.log(`[bunnyFetchFiles] File ID: ${fileId}`);
+            
+            // Get file metadata from Google Drive API to get the filename
+            const metadataUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?key=${GOOGLE_API_KEY}&fields=name,mimeType`;
+            const metadataResponse = await fetch(metadataUrl);
+            const metadata = await metadataResponse.json();
+            
+            let fileName = `video_${fileId}`;
+            if (metadata.name) {
+              fileName = metadata.name;
+            } else if (metadata.error) {
+              console.warn(`[bunnyFetchFiles] Could not get metadata:`, metadata.error.message);
+            }
+            
+            console.log(`[bunnyFetchFiles] File name: ${fileName}`);
+            
+            // Construct the direct download URL for Google Drive
+            const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            
+            console.log(`[bunnyFetchFiles] Sending to Bunny Stream: ${downloadUrl}`);
+            
+            // Call Bunny Stream's fetch endpoint
+            const fetchResult = await bunnyStreamFetchVideo(downloadUrl, fileName);
+            
+            if (!fetchResult.success) {
+              console.error(`[bunnyFetchFiles] Bunny fetch failed:`, fetchResult.error);
+              results.push({
+                success: false,
+                fileName,
+                error: fetchResult.error || 'Bunny Stream fetch failed',
+              });
+              continue;
+            }
+            
+            console.log(`[bunnyFetchFiles] Bunny fetch initiated - GUID: ${fetchResult.videoGuid}`);
+            
+            // If waitForProcessing is true, poll until video is ready
+            if (input.waitForProcessing && fetchResult.videoGuid) {
+              console.log(`[bunnyFetchFiles] Waiting for video to finish processing...`);
+              const videoStatus = await bunnyStreamWaitForVideo(fetchResult.videoGuid, 60, 3000); // 60 attempts, 3s each = 3 minutes max
+              
+              if (videoStatus) {
+                results.push({
+                  success: true,
+                  fileName,
+                  videoGuid: fetchResult.videoGuid,
+                  directPlayUrl: videoStatus.directPlayUrl,
+                  thumbnailUrl: videoStatus.thumbnailUrl,
+                  status: 'finished',
+                });
+              } else {
+                results.push({
+                  success: false,
+                  fileName,
+                  videoGuid: fetchResult.videoGuid,
+                  error: 'Video processing timed out or failed',
+                  status: 'timeout',
+                });
+              }
+            } else {
+              // Return immediately without waiting
+              results.push({
+                success: true,
+                fileName,
+                videoGuid: fetchResult.videoGuid,
+                status: 'processing',
+              });
+            }
+            
+          } catch (error: any) {
+            console.error(`[bunnyFetchFiles] Error processing link:`, error);
+            results.push({
+              success: false,
+              fileName: 'unknown',
+              error: error.message || 'Unknown error',
+            });
+          }
+        }
+        
+        console.log("[bunnyFetchFiles] ====== COMPLETE ======");
+        console.log(`[bunnyFetchFiles] Success: ${results.filter(r => r.success).length}/${results.length}`);
+        
+        return { results };
+      }),
+
+    // Check status of a Bunny Stream video
+    checkBunnyVideoStatus: protectedProcedure
+      .input(z.object({
+        videoGuid: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const status = await bunnyStreamWaitForVideo(input.videoGuid, 1, 0); // Just check once, no waiting
+        return status;
       }),
 
     // Exchange authorization code for tokens (with refresh token)

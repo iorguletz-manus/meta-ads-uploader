@@ -7,6 +7,12 @@ const BUNNY_STORAGE_ZONE = "manus-storage";
 const BUNNY_STORAGE_URL = `https://storage.bunnycdn.com/${BUNNY_STORAGE_ZONE}`;
 const BUNNY_CDN_URL = "https://manus.b-cdn.net";
 
+// Bunny Stream (Video Library) Integration
+// You need to create a Video Library in Bunny.net dashboard and get these values
+const BUNNY_STREAM_API_KEY = process.env.BUNNY_STREAM_API_KEY || "";
+const BUNNY_STREAM_LIBRARY_ID = process.env.BUNNY_STREAM_LIBRARY_ID || "";
+const BUNNY_STREAM_CDN_HOSTNAME = process.env.BUNNY_STREAM_CDN_HOSTNAME || ""; // e.g., "vz-abc123.b-cdn.net"
+
 // Folder for this app's files
 const APP_FOLDER = "meta-ads-uploader";
 
@@ -205,4 +211,212 @@ export async function listBunnyFiles(): Promise<string[]> {
     console.error("[Bunny] List error:", error);
     return [];
   }
+}
+
+
+// ============================================
+// Bunny Stream (Video Library) Functions
+// ============================================
+
+export interface BunnyStreamFetchResult {
+  success: boolean;
+  videoId?: string;
+  videoGuid?: string;
+  title?: string;
+  status?: number; // 0=created, 1=uploaded, 2=processing, 3=transcoding, 4=finished, 5=error
+  error?: string;
+}
+
+export interface BunnyStreamVideoStatus {
+  guid: string;
+  title: string;
+  status: number; // 0=created, 1=uploaded, 2=processing, 3=transcoding, 4=finished, 5=error
+  thumbnailUrl?: string;
+  directPlayUrl?: string;
+  hlsUrl?: string;
+  length?: number;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Fetch a video from URL using Bunny Stream's videos/fetch endpoint
+ * Bunny will download the video directly from the source URL
+ * @param sourceUrl - Direct download URL (e.g., Google Drive export URL)
+ * @param title - Title for the video in Bunny Stream
+ */
+export async function bunnyStreamFetchVideo(
+  sourceUrl: string,
+  title: string
+): Promise<BunnyStreamFetchResult> {
+  if (!BUNNY_STREAM_API_KEY || !BUNNY_STREAM_LIBRARY_ID) {
+    return {
+      success: false,
+      error: "Bunny Stream credentials not configured. Set BUNNY_STREAM_API_KEY and BUNNY_STREAM_LIBRARY_ID environment variables.",
+    };
+  }
+
+  try {
+    console.log(`[BunnyStream] Fetching video from URL: ${sourceUrl}`);
+    console.log(`[BunnyStream] Title: ${title}`);
+
+    const response = await fetch(
+      `https://video.bunnycdn.com/library/${BUNNY_STREAM_LIBRARY_ID}/videos/fetch`,
+      {
+        method: "POST",
+        headers: {
+          AccessKey: BUNNY_STREAM_API_KEY,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: sourceUrl,
+          title: title,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("[BunnyStream] Fetch failed:", response.status, data);
+      return {
+        success: false,
+        error: data.message || `Fetch failed: ${response.status}`,
+      };
+    }
+
+    console.log(`[BunnyStream] Video fetch initiated:`, data);
+
+    return {
+      success: true,
+      videoId: data.id?.toString(),
+      videoGuid: data.guid,
+      title: data.title,
+      status: data.status,
+    };
+  } catch (error) {
+    console.error("[BunnyStream] Fetch error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
+ * Get video status from Bunny Stream
+ * @param videoGuid - The GUID of the video
+ */
+export async function bunnyStreamGetVideoStatus(
+  videoGuid: string
+): Promise<BunnyStreamVideoStatus | null> {
+  if (!BUNNY_STREAM_API_KEY || !BUNNY_STREAM_LIBRARY_ID) {
+    console.error("[BunnyStream] Credentials not configured");
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `https://video.bunnycdn.com/library/${BUNNY_STREAM_LIBRARY_ID}/videos/${videoGuid}`,
+      {
+        method: "GET",
+        headers: {
+          AccessKey: BUNNY_STREAM_API_KEY,
+          Accept: "application/json",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.error("[BunnyStream] Get status failed:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    // Build URLs
+    const thumbnailUrl = data.thumbnailFileName 
+      ? `https://${BUNNY_STREAM_CDN_HOSTNAME}/${videoGuid}/${data.thumbnailFileName}`
+      : undefined;
+    
+    const directPlayUrl = `https://${BUNNY_STREAM_CDN_HOSTNAME}/${videoGuid}/play.mp4`;
+    const hlsUrl = `https://${BUNNY_STREAM_CDN_HOSTNAME}/${videoGuid}/playlist.m3u8`;
+
+    return {
+      guid: data.guid,
+      title: data.title,
+      status: data.status,
+      thumbnailUrl,
+      directPlayUrl,
+      hlsUrl,
+      length: data.length,
+      width: data.width,
+      height: data.height,
+    };
+  } catch (error) {
+    console.error("[BunnyStream] Get status error:", error);
+    return null;
+  }
+}
+
+/**
+ * Wait for video to finish processing
+ * @param videoGuid - The GUID of the video
+ * @param maxAttempts - Maximum polling attempts (default 30 = ~60 seconds)
+ * @param delayMs - Delay between attempts in ms (default 2000)
+ */
+export async function bunnyStreamWaitForVideo(
+  videoGuid: string,
+  maxAttempts: number = 30,
+  delayMs: number = 2000
+): Promise<BunnyStreamVideoStatus | null> {
+  console.log(`[BunnyStream] Waiting for video ${videoGuid} to finish processing...`);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const status = await bunnyStreamGetVideoStatus(videoGuid);
+    
+    if (!status) {
+      console.error(`[BunnyStream] Failed to get status for ${videoGuid}`);
+      return null;
+    }
+
+    console.log(`[BunnyStream] Attempt ${attempt}/${maxAttempts} - Status: ${status.status} (${getStatusName(status.status)})`);
+
+    // Status 4 = finished, 5 = error
+    if (status.status === 4) {
+      console.log(`[BunnyStream] Video ${videoGuid} finished processing!`);
+      return status;
+    }
+
+    if (status.status === 5) {
+      console.error(`[BunnyStream] Video ${videoGuid} processing failed`);
+      return null;
+    }
+
+    // Wait before next attempt
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  console.warn(`[BunnyStream] Timeout waiting for video ${videoGuid}`);
+  return null;
+}
+
+function getStatusName(status: number): string {
+  const statusNames: { [key: number]: string } = {
+    0: "created",
+    1: "uploaded",
+    2: "processing",
+    3: "transcoding",
+    4: "finished",
+    5: "error",
+  };
+  return statusNames[status] || "unknown";
+}
+
+/**
+ * Check if Bunny Stream is configured
+ */
+export function isBunnyStreamConfigured(): boolean {
+  return !!(BUNNY_STREAM_API_KEY && BUNNY_STREAM_LIBRARY_ID && BUNNY_STREAM_CDN_HOSTNAME);
 }
