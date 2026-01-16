@@ -17,7 +17,7 @@ const META_API_BASE = "https://graph.facebook.com/v24.0";
 
 // Helper to wait for video processing and get thumbnail URL from Meta
 async function getVideoThumbnailUrl(videoId: string, accessToken: string): Promise<string | null> {
-  const maxAttempts = 30; // Max 30 attempts (about 60 seconds)
+  const maxAttempts = 5; // Max 5 attempts (about 10 seconds) - video should be ready by Step 4
   const delayMs = 2000; // 2 seconds between attempts
   
   try {
@@ -381,14 +381,14 @@ export const appRouter = router({
           
           console.log("[uploadVideoToMeta] Success! Video ID:", data.id);
           
-          // Get video thumbnail URL from Meta
-          const thumbnailUrl = await getVideoThumbnailUrl(data.id, input.accessToken);
-          console.log("[uploadVideoToMeta] Thumbnail URL:", thumbnailUrl);
+          // Don't wait for thumbnail here - it will be fetched in Step 4 (PUBLISH)
+          // Meta processes video in background, thumbnail will be ready by the time user clicks PUBLISH
+          console.log("[uploadVideoToMeta] Skipping thumbnail wait - will fetch in Step 4");
           
           return { 
             success: true, 
             videoId: data.id,
-            thumbnailUrl: thumbnailUrl || undefined,
+            thumbnailUrl: undefined, // Will be fetched in Step 4
             fileName: input.fileName 
           };
         } catch (error: any) {
@@ -522,14 +522,13 @@ export const appRouter = router({
             console.log("[uploadFromGoogleDrive] Video uploaded! ID:", data.id);
             console.log("[uploadFromGoogleDrive] Total time:", totalTime, "ms (", Math.round(totalTime / 1000), "s)");
             
-            // Get video thumbnail URL from Meta
-            const thumbnailUrl = await getVideoThumbnailUrl(data.id, input.accessToken);
-            console.log("[uploadFromGoogleDrive] Thumbnail URL:", thumbnailUrl);
+            // Don't wait for thumbnail here - it will be fetched in Step 4 (PUBLISH)
+            console.log("[uploadFromGoogleDrive] Skipping thumbnail wait - will fetch in Step 4");
             console.log("=".repeat(80) + "\n");
             return { 
               success: true, 
               videoId: data.id,
-              thumbnailUrl: thumbnailUrl || undefined,
+              thumbnailUrl: undefined, // Will be fetched in Step 4
               fileName: input.fileName,
               type: "video" as const
             };
@@ -628,15 +627,14 @@ export const appRouter = router({
             console.log("[uploadFromPublicUrl] Video ID:", data.id);
             console.log("[uploadFromPublicUrl] Total time:", totalTime, "ms");
             
-            // Get video thumbnail URL from Meta
-            const thumbnailUrl = await getVideoThumbnailUrl(data.id, input.accessToken);
-            console.log("[uploadFromPublicUrl] Thumbnail URL:", thumbnailUrl);
+            // Don't wait for thumbnail here - it will be fetched in Step 4 (PUBLISH)
+            console.log("[uploadFromPublicUrl] Skipping thumbnail wait - will fetch in Step 4");
             console.log("=".repeat(80) + "\n");
             
             return {
               success: true,
               videoId: data.id,
-              thumbnailUrl: thumbnailUrl || undefined,
+              thumbnailUrl: undefined, // Will be fetched in Step 4
               fileName: input.fileName,
               type: "video" as const
             };
@@ -1660,16 +1658,21 @@ export const appRouter = router({
             if (uploadedVideos.length > 0) {
               console.log(`[STEP 4.${adIndex}d] Creating VIDEO creative`);
               
-              // Determine thumbnail source: prefer image_hash if we have uploaded images, otherwise use image_url from Meta thumbnail
+              // Determine thumbnail source: prefer image_hash if we have uploaded images, otherwise fetch from Meta
               const thumbnailData: Record<string, string> = {};
               if (uploadedImages.length > 0) {
                 thumbnailData.image_hash = uploadedImages[0].hash;
                 console.log(`[STEP 4.${adIndex}d] Using uploaded image as thumbnail, hash: ${uploadedImages[0].hash}`);
-              } else if (uploadedVideos[0].thumbnailUrl) {
-                thumbnailData.image_url = uploadedVideos[0].thumbnailUrl;
-                console.log(`[STEP 4.${adIndex}d] Using Meta video thumbnail URL: ${uploadedVideos[0].thumbnailUrl}`);
               } else {
-                console.warn(`[STEP 4.${adIndex}d] WARNING: No thumbnail available for video ad!`);
+                // Fetch thumbnail from Meta now (video should be processed by now)
+                console.log(`[STEP 4.${adIndex}d] Fetching thumbnail from Meta for video ${uploadedVideos[0].id}...`);
+                const thumbnailUrl = await getVideoThumbnailUrl(uploadedVideos[0].id, input.accessToken);
+                if (thumbnailUrl) {
+                  thumbnailData.image_url = thumbnailUrl;
+                  console.log(`[STEP 4.${adIndex}d] Got Meta video thumbnail URL: ${thumbnailUrl}`);
+                } else {
+                  console.warn(`[STEP 4.${adIndex}d] WARNING: No thumbnail available for video ad - Meta will auto-generate`);
+                }
               }
               
               // Video creative
