@@ -372,12 +372,34 @@ export default function Home() {
       const token = params.get("access_token");
       const expiresIn = params.get("expires_in");
       if (token) {
-        setFbAccessToken(token);
-        setFbConnected(true);
         window.history.replaceState({}, document.title, window.location.pathname);
         const expiry = expiresIn ? parseInt(expiresIn) : 5184000;
-        saveTokenMutation.mutate({ accessToken: token, expiresIn: expiry });
-        toast.success("Facebook connected!");
+        
+        // Save token and get long-lived version back
+        saveTokenMutation.mutate(
+          { accessToken: token, expiresIn: expiry },
+          {
+            onSuccess: (data: any) => {
+              // Use the long-lived token returned from server
+              const longLivedToken = data.accessToken || token;
+              const longLivedExpiry = data.expiresIn || expiry;
+              
+              setFbAccessToken(longLivedToken);
+              setFbConnected(true);
+              
+              const daysUntilExpiry = Math.round(longLivedExpiry / 86400);
+              toast.success(`Facebook connected! Token valid for ${daysUntilExpiry} days`);
+              console.log("[FB Token] Long-lived token received, expires in", daysUntilExpiry, "days");
+            },
+            onError: (error) => {
+              // Fallback to short-lived token if exchange fails
+              setFbAccessToken(token);
+              setFbConnected(true);
+              toast.success("Facebook connected!");
+              console.error("[FB Token] Exchange failed, using short-lived token:", error);
+            }
+          }
+        );
       }
     }
   }, []);

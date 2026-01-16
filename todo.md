@@ -392,3 +392,11 @@
 
 - [x] Micșorare padding/margin la Card-uri (Step 1-6) - sub titlu și deasupra
 - [x] Buton "Create All" → "PUBLISH ALL" - mare, triplu înălțime, centrat pe pagină, gradient albastru-mov
+
+
+## Facebook Token Long-Lived - Round 20
+
+- [x] Implementare exchange token short-lived → long-lived (60 zile)
+- [x] Salvare token long-lived în DB
+- [x] Auto-refresh la login
+- [x] Frontend actualizează token-ul cu versiunea long-lived

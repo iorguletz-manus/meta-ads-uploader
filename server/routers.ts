@@ -15,6 +15,40 @@ const FIXED_PASSWORD = "cinema10";
 // Meta API base URL
 const META_API_BASE = "https://graph.facebook.com/v24.0";
 
+// Facebook App credentials (from ENV)
+const FB_APP_ID = process.env.VITE_FACEBOOK_APP_ID;
+const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
+
+// Exchange short-lived token for long-lived token (60 days)
+async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ accessToken: string; expiresIn: number }> {
+  if (!FB_APP_ID || !FB_APP_SECRET) {
+    console.log("[exchangeToken] FB_APP_ID or FB_APP_SECRET not set, returning original token");
+    return { accessToken: shortLivedToken, expiresIn: 3600 }; // Return original if no app secret
+  }
+  
+  try {
+    const url = `https://graph.facebook.com/v24.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${FB_APP_ID}&client_secret=${FB_APP_SECRET}&fb_exchange_token=${shortLivedToken}`;
+    
+    console.log("[exchangeToken] Exchanging for long-lived token...");
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.error) {
+      console.error("[exchangeToken] Error:", data.error.message);
+      return { accessToken: shortLivedToken, expiresIn: 3600 };
+    }
+    
+    console.log("[exchangeToken] Success! Token expires in:", data.expires_in, "seconds (", Math.round(data.expires_in / 86400), "days)");
+    return {
+      accessToken: data.access_token,
+      expiresIn: data.expires_in || 5184000 // Default 60 days in seconds
+    };
+  } catch (error) {
+    console.error("[exchangeToken] Failed:", error);
+    return { accessToken: shortLivedToken, expiresIn: 3600 };
+  }
+}
+
 // Helper to make Meta API requests
 async function metaApiRequest(endpoint: string, accessToken: string, options: RequestInit = {}) {
   const url = `${META_API_BASE}${endpoint}${endpoint.includes("?") ? "&" : "?"}access_token=${accessToken}`;
@@ -78,15 +112,25 @@ export const appRouter = router({
   }),
 
   meta: router({
-    // Save Facebook token to database
+    // Save Facebook token to database (with automatic exchange to long-lived)
     saveFacebookToken: protectedProcedure
       .input(z.object({ accessToken: z.string(), expiresIn: z.number() }))
       .mutation(async ({ input, ctx }) => {
         if (!ctx.user) throw new Error("Not authenticated");
-        console.log("[saveFacebookToken] Saving token for openId:", ctx.user.openId);
-        await saveFacebookToken(ctx.user.openId, input.accessToken, input.expiresIn);
-        console.log("[saveFacebookToken] Token saved successfully");
-        return { success: true };
+        console.log("[saveFacebookToken] Received token, attempting to exchange for long-lived...");
+        
+        // Exchange for long-lived token (60 days)
+        const longLived = await exchangeForLongLivedToken(input.accessToken);
+        
+        console.log("[saveFacebookToken] Saving long-lived token for openId:", ctx.user.openId);
+        await saveFacebookToken(ctx.user.openId, longLived.accessToken, longLived.expiresIn);
+        console.log("[saveFacebookToken] Long-lived token saved successfully");
+        
+        return { 
+          success: true,
+          accessToken: longLived.accessToken,
+          expiresIn: longLived.expiresIn
+        };
       }),
 
     // Get saved Facebook token from database
