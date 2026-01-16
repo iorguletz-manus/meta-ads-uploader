@@ -1152,10 +1152,14 @@ export const appRouter = router({
             name: `${input.adName}_creative`,
             object_story_spec: JSON.stringify(objectStorySpec),
             asset_feed_spec: JSON.stringify(assetFeedSpec),
-            // Disable Advantage+ creative enhancements
+            // Disable Advantage+ creative enhancements (individual features)
             degrees_of_freedom_spec: JSON.stringify({
               creative_features_spec: {
-                standard_enhancements: { enroll_status: "OPT_OUT" },
+                image_template: { enroll_status: "OPT_OUT" },
+                image_touchups: { enroll_status: "OPT_OUT" },
+                text_optimizations: { enroll_status: "OPT_OUT" },
+                inline_comment: { enroll_status: "OPT_OUT" },
+                video_auto_crop: { enroll_status: "OPT_OUT" },
               },
             }),
             // Disable Multi-advertiser ads
@@ -1169,10 +1173,14 @@ export const appRouter = router({
           creativeData = {
             name: `${input.adName}_creative`,
             object_story_spec: JSON.stringify(objectStorySpec),
-            // Disable Advantage+ creative enhancements
+            // Disable Advantage+ creative enhancements (individual features)
             degrees_of_freedom_spec: JSON.stringify({
               creative_features_spec: {
-                standard_enhancements: { enroll_status: "OPT_OUT" },
+                image_template: { enroll_status: "OPT_OUT" },
+                image_touchups: { enroll_status: "OPT_OUT" },
+                text_optimizations: { enroll_status: "OPT_OUT" },
+                inline_comment: { enroll_status: "OPT_OUT" },
+                video_auto_crop: { enroll_status: "OPT_OUT" },
               },
             }),
             // Disable Multi-advertiser ads
@@ -1689,10 +1697,14 @@ export const appRouter = router({
                     ...thumbnailData,
                   },
                 }),
-                // Disable Advantage+ creative enhancements
+                // Disable Advantage+ creative enhancements (individual features)
                 degrees_of_freedom_spec: JSON.stringify({
                   creative_features_spec: {
-                    standard_enhancements: { enroll_status: "OPT_OUT" },
+                    image_template: { enroll_status: "OPT_OUT" },
+                    image_touchups: { enroll_status: "OPT_OUT" },
+                    text_optimizations: { enroll_status: "OPT_OUT" },
+                    inline_comment: { enroll_status: "OPT_OUT" },
+                    video_auto_crop: { enroll_status: "OPT_OUT" },
                   },
                 }),
                 // Disable Multi-advertiser ads
@@ -1718,10 +1730,14 @@ export const appRouter = router({
                     },
                   },
                 }),
-                // Disable Advantage+ creative enhancements
+                // Disable Advantage+ creative enhancements (individual features)
                 degrees_of_freedom_spec: JSON.stringify({
                   creative_features_spec: {
-                    standard_enhancements: { enroll_status: "OPT_OUT" },
+                    image_template: { enroll_status: "OPT_OUT" },
+                    image_touchups: { enroll_status: "OPT_OUT" },
+                    text_optimizations: { enroll_status: "OPT_OUT" },
+                    inline_comment: { enroll_status: "OPT_OUT" },
+                    video_auto_crop: { enroll_status: "OPT_OUT" },
                   },
                 }),
                 // Disable Multi-advertiser ads
