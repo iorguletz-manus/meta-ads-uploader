@@ -3112,7 +3112,7 @@ export default function Home() {
                           </div>
                           <div className="flex gap-1">
                             {media.map((m) => (
-                              <div key={m.id} className={`relative group rounded overflow-hidden bg-muted flex-shrink-0 ${m.type === 'video' ? 'w-8 h-14' : 'w-12 h-12'}`}>
+                              <div key={m.id} className={`relative group rounded overflow-hidden bg-muted flex-shrink-0 ${m.type === 'video' ? 'w-16 h-28' : 'w-12 h-12'}`}>
                                 {m.type === "image" ? (
                                   <img src={m.preview || m.thumbnail || m.googleDriveThumbnail || ''} alt="" className="w-full h-full object-cover" />
                                 ) : (
@@ -3137,11 +3137,9 @@ export default function Home() {
                                       />
                                     </div>
                                     <span className="text-[7px] text-white font-medium">
-                                      {(m.uploadProgress || 0) < 50 
-                                        ? `Uploading ${m.uploadProgress || 0}%` 
-                                        : (m.uploadProgress || 0) < 100 
-                                          ? 'Processing at Meta...' 
-                                          : 'Done!'}
+                                      {(m.uploadProgress || 0) < 100 
+                                        ? `${m.uploadProgress || 0}%` 
+                                        : 'Done!'}
                                     </span>
                                   </div>
                                 )}

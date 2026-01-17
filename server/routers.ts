@@ -1858,7 +1858,7 @@ export const appRouter = router({
                     video_id: uploadedVideos[0].id,
                     message: ad.primaryText,
                     title: ad.headline,
-                    link_description: ad.headline,
+                    // Removed link_description to avoid showing description in ads
                     call_to_action: { 
                       type: "LEARN_MORE",
                       value: { link: ad.url }
