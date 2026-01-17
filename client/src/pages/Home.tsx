@@ -3335,7 +3335,8 @@ export default function Home() {
                         <Input
                           value={adSet.name}
                           onChange={(e) => updateAdSet(adSet.id, "name", e.target.value)}
-                          className="h-6 text-xs font-medium max-w-[200px]"
+                          className="h-6 font-medium max-w-[240px]"
+                          style={{ fontSize: '10px' }}
                           placeholder="Ad Set Name"
                         />
                         <span className="text-xs text-muted-foreground">({adSet.ads.length} ads)</span>
@@ -3451,7 +3452,8 @@ export default function Home() {
                                   <Input
                                     value={ad.adName}
                                     onChange={(e) => updateAd(adSet.id, ad.id, "adName", e.target.value)}
-                                    className="h-6 text-xs font-medium flex-1 uppercase"
+                                    className="h-6 font-medium flex-1 uppercase"
+                                    style={{ fontSize: '10px', minWidth: '240px' }}
                                     placeholder="AD NAME"
                                   />
                                   {ad.status === "success" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
