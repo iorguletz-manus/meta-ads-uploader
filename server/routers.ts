@@ -2127,24 +2127,79 @@ export const appRouter = router({
                 if (input.postComment && input.postComment.trim()) {
                   console.log(`\n[STEP 4.${adIndex}g] -------- POSTING COMMENT --------`);
                   console.log(`[STEP 4.${adIndex}g] Comment text: ${input.postComment.substring(0, 50)}...`);
-                  console.log(`[STEP 4.${adIndex}g] Post Page ID: ${postPageId}`);
+                  console.log(`[STEP 4.${adIndex}g] Post Page ID from story: ${postPageId}`);
+                  console.log(`[STEP 4.${adIndex}g] Selected Page ID from UI: ${input.pageId || 'not provided'}`);
+                  
+                  // Use the page ID from UI selection (input.pageId) or fall back to postPageId from story
+                  const targetPageId = input.pageId || postPageId;
+                  console.log(`[STEP 4.${adIndex}g] Using Page ID: ${targetPageId}`);
                   
                   // Get Page Access Token for posting comments
+                  // Try multiple methods to get page token
                   let pageAccessToken = input.accessToken; // Default to user token
+                  let gotPageToken = false;
+                  
+                  // Method 1: Try direct page access_token request
                   try {
-                    const pagesResponse = await metaApiRequest(
-                      `/me/accounts?fields=id,access_token`,
+                    console.log(`[STEP 4.${adIndex}g] Method 1: Direct page token request for ${targetPageId}...`);
+                    const directPageResponse = await metaApiRequest(
+                      `/${targetPageId}?fields=access_token,name`,
                       input.accessToken
                     );
-                    const targetPage = pagesResponse.data?.find((p: any) => p.id === postPageId);
-                    if (targetPage?.access_token) {
-                      pageAccessToken = targetPage.access_token;
-                      console.log(`[STEP 4.${adIndex}g] Got Page Access Token for page ${postPageId}`);
-                    } else {
-                      console.log(`[STEP 4.${adIndex}g] Using User Access Token (page token not found)`);
+                    if (directPageResponse.access_token) {
+                      pageAccessToken = directPageResponse.access_token;
+                      gotPageToken = true;
+                      console.log(`[STEP 4.${adIndex}g] ✓ Method 1 SUCCESS: Got Page Access Token for "${directPageResponse.name}"`);
                     }
-                  } catch (pageTokenError) {
-                    console.error(`[STEP 4.${adIndex}g] Error getting page token:`, pageTokenError);
+                  } catch (err: any) {
+                    console.log(`[STEP 4.${adIndex}g] Method 1 failed:`, err.message);
+                  }
+                  
+                  // Method 2: Try /me/accounts
+                  if (!gotPageToken) {
+                    try {
+                      console.log(`[STEP 4.${adIndex}g] Method 2: Fetching /me/accounts...`);
+                      const pagesResponse = await metaApiRequest(
+                        `/me/accounts?fields=id,name,access_token`,
+                        input.accessToken
+                      );
+                      console.log(`[STEP 4.${adIndex}g] Found ${pagesResponse.data?.length || 0} pages`);
+                      
+                      const targetPage = pagesResponse.data?.find((p: any) => p.id === targetPageId || p.id === postPageId);
+                      if (targetPage?.access_token) {
+                        pageAccessToken = targetPage.access_token;
+                        gotPageToken = true;
+                        console.log(`[STEP 4.${adIndex}g] ✓ Method 2 SUCCESS: Got token for "${targetPage.name}"`);
+                      }
+                    } catch (err: any) {
+                      console.log(`[STEP 4.${adIndex}g] Method 2 failed:`, err.message);
+                    }
+                  }
+                  
+                  // Method 3: Try getting page token via business manager
+                  if (!gotPageToken) {
+                    try {
+                      console.log(`[STEP 4.${adIndex}g] Method 3: Fetching pages via /me/businesses...`);
+                      const businessesResponse = await metaApiRequest(
+                        `/me/businesses?fields=id,name,owned_pages{id,name,access_token}`,
+                        input.accessToken
+                      );
+                      for (const biz of businessesResponse.data || []) {
+                        const targetPage = biz.owned_pages?.data?.find((p: any) => p.id === targetPageId || p.id === postPageId);
+                        if (targetPage?.access_token) {
+                          pageAccessToken = targetPage.access_token;
+                          gotPageToken = true;
+                          console.log(`[STEP 4.${adIndex}g] \u2713 Method 3 SUCCESS: Got token for "${targetPage.name}" via business "${biz.name}"`);
+                          break;
+                        }
+                      }
+                    } catch (err: any) {
+                      console.log(`[STEP 4.${adIndex}g] Method 3 failed:`, err.message);
+                    }
+                  }
+                  
+                  if (!gotPageToken) {
+                    console.log(`[STEP 4.${adIndex}g] ✗ Could not get Page Access Token - will try with user token`);
                   }
                   
                   const commentResponse = await fetch(

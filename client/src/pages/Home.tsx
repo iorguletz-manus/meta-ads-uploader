@@ -468,34 +468,46 @@ export default function Home() {
   // Check for FB token in URL (OAuth callback)
   useEffect(() => {
     const hash = window.location.hash;
+    console.log("[FB OAuth] Checking URL hash:", hash ? "has hash" : "no hash");
     if (hash.includes("access_token")) {
       const params = new URLSearchParams(hash.substring(1));
       const token = params.get("access_token");
       const expiresIn = params.get("expires_in");
+      console.log("[FB OAuth] Token found in URL:", token ? "yes" : "no");
       if (token) {
         window.history.replaceState({}, document.title, window.location.pathname);
         const expiry = expiresIn ? parseInt(expiresIn) : 5184000;
         
+        console.log("[FB OAuth] Saving token to database...");
         // Save token and get long-lived version back
         saveTokenMutation.mutate(
           { accessToken: token, expiresIn: expiry },
           {
             onSuccess: (data: any) => {
+              console.log("[FB OAuth] Token saved successfully!", data);
               // Use the long-lived token returned from server
               const longLivedToken = data.accessToken || token;
               const longLivedExpiry = data.expiresIn || expiry;
               
+              // Also save to localStorage as backup
+              localStorage.setItem('meta-ads-fb-token', longLivedToken);
+              localStorage.setItem('meta-ads-fb-token-expiry', String(longLivedExpiry));
+              
               setFbAccessToken(longLivedToken);
               setFbConnected(true);
+              localStorage.setItem(LS_KEYS.FB_CONNECTED, "true");
               
               const daysUntilExpiry = Math.round(longLivedExpiry / 86400);
               toast.success(`Facebook connected! Token valid for ${daysUntilExpiry} days`);
               console.log("[FB Token] Long-lived token received, expires in", daysUntilExpiry, "days");
             },
-            onError: (error) => {
+            onError: (error: any) => {
+              console.error("[FB OAuth] Error saving token:", error);
               // Fallback to short-lived token if exchange fails
+              localStorage.setItem('meta-ads-fb-token', token);
               setFbAccessToken(token);
               setFbConnected(true);
+              localStorage.setItem(LS_KEYS.FB_CONNECTED, "true");
               toast.success("Facebook connected!");
               console.error("[FB Token] Exchange failed, using short-lived token:", error);
             }
@@ -690,8 +702,8 @@ export default function Home() {
   const handleFacebookLogin = () => {
     const appId = import.meta.env.VITE_FACEBOOK_APP_ID;
     const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
-    const scope = "ads_management,ads_read,business_management";
-    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&response_type=token`;
+    const scope = "ads_management,ads_read,business_management,pages_manage_engagement,pages_read_engagement,pages_show_list,pages_manage_posts";
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&response_type=token&auth_type=rerequest`;
     window.location.href = authUrl;
   };
 
