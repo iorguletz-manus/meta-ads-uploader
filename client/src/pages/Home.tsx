@@ -1871,12 +1871,22 @@ export default function Home() {
       return;
     }
 
-    const groups = groupMediaByPrefix(mediaPool);
-    const groupsArray = Array.from(groups.entries());
-    
     const hasImages = mediaPool.some(m => m.type === "image");
     const hasVideos = mediaPool.some(m => m.type === "video");
     const mediaType: "image" | "video" | "mixed" = hasImages && hasVideos ? "mixed" : hasVideos ? "video" : "image";
+
+    // For images: each image is a separate "group" (1 ad per image)
+    // For videos: group by prefix (aspect ratios together)
+    let groupsArray: [string, MediaFile[]][];
+    
+    if (mediaType === "image") {
+      // Each image becomes its own group
+      groupsArray = mediaPool.map(m => [m.name, [m]] as [string, MediaFile[]]);
+    } else {
+      // Videos: group by prefix
+      const groups = groupMediaByPrefix(mediaPool);
+      groupsArray = Array.from(groups.entries());
+    }
 
     const newAdSets: AdSetData[] = [];
     let groupIndex = 0;
