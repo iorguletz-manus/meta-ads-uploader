@@ -1898,54 +1898,108 @@ export default function Home() {
     const newAdSets: AdSetData[] = [];
 
     if (mediaType === "image") {
-      // IMAGE LOGIC:
-      // - Each image = 1 AdSet
-      // - adsPerAdSet = number of hooks per image
-      // - numAdSets determines how many images to use (if less than total images)
-      // - If numAdSets > images, use all images
-      // - If numAdSets < images, distribute images across adsets
+      // IMAGE LOGIC - Two scenarios:
+      // Scenario 1: numAdSets >= numImages → each image = 1 AdSet with N hooks (adsPerAdSet = hooks)
+      // Scenario 2: numAdSets < numImages → distribute images across AdSets (each image = 1 ad, no hooks)
       
-      const imagesToUse = Math.min(numAdSets, mediaPool.length);
+      // Helper to generate AdSet name from ad name composer template
+      const generateAdSetNameFromComposer = (imageName: string): string => {
+        const cleanImageName = imageName.replace(/\.[^/.]+$/, '').toUpperCase();
+        const fullName = adNameComposer.replace('$IMAGE-NAME', cleanImageName);
+        // Remove hook suffix for adset name
+        return cleanAdsetName(fullName);
+      };
       
-      for (let i = 0; i < imagesToUse; i++) {
-        const image = mediaPool[i];
-        const ads: AdData[] = [];
-        
-        // Create N ads (hooks) for this image
-        for (let hookIdx = 0; hookIdx < adsPerAdSet; hookIdx++) {
-          ads.push({
-            id: `ad-${Date.now()}-${i}-${hookIdx}`,
-            adName: composeAdName(image.name, hookIdx, false),
-            hook: "",
-            primaryText: "",
-            media: [image], // Same image for all hooks
+      if (numAdSets >= mediaPool.length) {
+        // Scenario 1: Each image = 1 AdSet with N hooks
+        for (let i = 0; i < mediaPool.length; i++) {
+          const image = mediaPool[i];
+          const ads: AdData[] = [];
+          
+          // Create N ads (hooks) for this image
+          for (let hookIdx = 0; hookIdx < adsPerAdSet; hookIdx++) {
+            ads.push({
+              id: `ad-${Date.now()}-${i}-${hookIdx}`,
+              adName: composeAdName(image.name, hookIdx, false),
+              hook: "",
+              primaryText: "",
+              media: [image], // Same image for all hooks
+              status: "idle",
+            });
+          }
+          
+          const adsetName = generateAdSetNameFromComposer(image.name);
+          
+          newAdSets.push({
+            id: `adset-${Date.now()}-${i}`,
+            name: adsetName,
+            ads,
+            sharedBody: "",
+            sharedHeadline: adDetailsQuery.data?.headline || "",
+            sharedUrl: adDetailsQuery.data?.url || "",
+            sharedPageId: adDetailsQuery.data?.pageId || (pagesQuery.data?.[0]?.id || ""),
+            sharedPostComment: "",
             status: "idle",
+            isExpanded: true,
+            mediaType,
+            scheduleEnabled: false,
+            scheduleDate: getTomorrowDate(),
+            scheduleTime: "00:05",
           });
         }
         
-        const adsetName = cleanAdsetName(image.name.replace(/\.[^/.]+$/, "").toUpperCase());
+        if (numAdSets > mediaPool.length) {
+          toast.info(`Only ${mediaPool.length} images available, created ${mediaPool.length} Ad Sets`);
+        }
+      } else {
+        // Scenario 2: Distribute images across fewer AdSets (each image = 1 ad, no hooks)
+        // Calculate how many images per adset
+        const imagesPerAdSet = Math.ceil(mediaPool.length / numAdSets);
+        let imageIndex = 0;
         
-        newAdSets.push({
-          id: `adset-${Date.now()}-${i}`,
-          name: adsetName,
-          ads,
-          sharedBody: "",
-          sharedHeadline: adDetailsQuery.data?.headline || "",
-          sharedUrl: adDetailsQuery.data?.url || "",
-          sharedPageId: adDetailsQuery.data?.pageId || (pagesQuery.data?.[0]?.id || ""),
-          sharedPostComment: "",
-          status: "idle",
-          isExpanded: true,
-          mediaType,
-          scheduleEnabled: false,
-          scheduleDate: getTomorrowDate(),
-          scheduleTime: "00:05",
-        });
-      }
-      
-      // If user selected more adsets than images, show info
-      if (numAdSets > mediaPool.length) {
-        toast.info(`Only ${mediaPool.length} images available, created ${mediaPool.length} Ad Sets`);
+        for (let i = 0; i < numAdSets && imageIndex < mediaPool.length; i++) {
+          const ads: AdData[] = [];
+          const imagesInThisAdSet: MediaFile[] = [];
+          
+          // Add images to this adset (up to imagesPerAdSet or remaining images)
+          for (let j = 0; j < imagesPerAdSet && imageIndex < mediaPool.length; j++) {
+            const image = mediaPool[imageIndex];
+            imagesInThisAdSet.push(image);
+            
+            // Each image is a separate ad (no hooks in this scenario)
+            ads.push({
+              id: `ad-${Date.now()}-${imageIndex}`,
+              adName: composeAdName(image.name, 0, false).replace(/_HOOK1$/, ''), // Remove HOOK1 suffix
+              hook: "",
+              primaryText: "",
+              media: [image],
+              status: "idle",
+            });
+            imageIndex++;
+          }
+          
+          // AdSet name from first image in the set
+          const adsetName = imagesInThisAdSet.length > 0 
+            ? generateAdSetNameFromComposer(imagesInThisAdSet[0].name)
+            : `Ad Set ${i + 1}`;
+          
+          newAdSets.push({
+            id: `adset-${Date.now()}-${i}`,
+            name: adsetName,
+            ads,
+            sharedBody: "",
+            sharedHeadline: adDetailsQuery.data?.headline || "",
+            sharedUrl: adDetailsQuery.data?.url || "",
+            sharedPageId: adDetailsQuery.data?.pageId || (pagesQuery.data?.[0]?.id || ""),
+            sharedPostComment: "",
+            status: "idle",
+            isExpanded: true,
+            mediaType,
+            scheduleEnabled: false,
+            scheduleDate: getTomorrowDate(),
+            scheduleTime: "00:05",
+          });
+        }
       }
     } else {
       // VIDEO LOGIC (unchanged):
@@ -3333,7 +3387,7 @@ export default function Home() {
                         <Input
                           value={adSet.name}
                           onChange={(e) => updateAdSet(adSet.id, "name", e.target.value)}
-                          className="h-6 font-medium max-w-[240px]"
+                          className="h-6 font-medium max-w-[312px]"
                           style={{ fontSize: '10px' }}
                           placeholder="Ad Set Name"
                         />
@@ -3451,7 +3505,7 @@ export default function Home() {
                                     value={ad.adName}
                                     onChange={(e) => updateAd(adSet.id, ad.id, "adName", e.target.value)}
                                     className="h-6 font-medium flex-1 uppercase"
-                                    style={{ fontSize: '10px', minWidth: '240px' }}
+                                    style={{ fontSize: '10px', minWidth: '312px' }}
                                     placeholder="AD NAME"
                                   />
                                   {ad.status === "success" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
