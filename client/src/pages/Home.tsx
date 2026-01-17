@@ -585,7 +585,13 @@ export default function Home() {
   useEffect(() => { setLS(LS_KEYS.ADSET_SEARCH, adSetSearch); }, [adSetSearch]);
   useEffect(() => { setLS(LS_KEYS.AD_SEARCH, adSearch); }, [adSearch]);
   useEffect(() => { setLS(LS_KEYS.SHOW_PREVIEW, showPreview); }, [showPreview]);
-  useEffect(() => { setLS(LS_KEYS.ADSETS_PREVIEW, adSetsPreview); }, [adSetsPreview]);
+  // Debounce localStorage save for adSetsPreview to reduce input lag
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setLS(LS_KEYS.ADSETS_PREVIEW, adSetsPreview);
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [adSetsPreview]);
   
   // Save media pool to localStorage (only save CDN URLs, not base64)
   useEffect(() => {
@@ -3481,19 +3487,19 @@ export default function Home() {
                           </div>
                           <div>
                             <Label className="text-[10px] text-muted-foreground">Facebook Page</Label>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1">
                               {/* Page avatar */}
                               {adSet.sharedPageId && pagesQuery.data?.find(p => p.id === adSet.sharedPageId)?.picture?.data?.url && (
                                 <img 
                                   src={pagesQuery.data?.find(p => p.id === adSet.sharedPageId)?.picture?.data?.url}
                                   alt=""
-                                  className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                                  className="w-5 h-5 rounded-full object-cover flex-shrink-0"
                                 />
                               )}
                               <select
                                 value={adSet.sharedPageId}
                                 onChange={(e) => updateAdSet(adSet.id, "sharedPageId", e.target.value)}
-                                className="w-32 h-6 text-xs border rounded px-2 bg-background"
+                                className="w-40 h-6 text-xs border rounded px-2 bg-background"
                               >
                                 <option value="">Select...</option>
                                 {pagesQuery.data?.map((page) => (

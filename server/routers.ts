@@ -2122,13 +2122,32 @@ export const appRouter = router({
                 postUrl = `https://www.facebook.com/${postPageId}/posts/${postId}/`;
                 console.log(`[STEP 4.${adIndex}f] Post URL: ${postUrl}`);
                 
-                // STEP 4g: Post comment if provided
+                // STEP 4g: Post comment if provided - need Page Access Token!
                 if (input.postComment && input.postComment.trim()) {
                   console.log(`\n[STEP 4.${adIndex}g] -------- POSTING COMMENT --------`);
                   console.log(`[STEP 4.${adIndex}g] Comment text: ${input.postComment.substring(0, 50)}...`);
+                  console.log(`[STEP 4.${adIndex}g] Post Page ID: ${postPageId}`);
+                  
+                  // Get Page Access Token for posting comments
+                  let pageAccessToken = input.accessToken; // Default to user token
+                  try {
+                    const pagesResponse = await metaApiRequest(
+                      `/me/accounts?fields=id,access_token`,
+                      input.accessToken
+                    );
+                    const targetPage = pagesResponse.data?.find((p: any) => p.id === postPageId);
+                    if (targetPage?.access_token) {
+                      pageAccessToken = targetPage.access_token;
+                      console.log(`[STEP 4.${adIndex}g] Got Page Access Token for page ${postPageId}`);
+                    } else {
+                      console.log(`[STEP 4.${adIndex}g] Using User Access Token (page token not found)`);
+                    }
+                  } catch (pageTokenError) {
+                    console.error(`[STEP 4.${adIndex}g] Error getting page token:`, pageTokenError);
+                  }
                   
                   const commentResponse = await fetch(
-                    `${META_API_BASE}/${effectiveObjectStoryId}/comments?access_token=${input.accessToken}`,
+                    `${META_API_BASE}/${effectiveObjectStoryId}/comments?access_token=${pageAccessToken}`,
                     {
                       method: "POST",
                       headers: { "Content-Type": "application/x-www-form-urlencoded" },
