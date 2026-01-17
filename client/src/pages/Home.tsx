@@ -1875,22 +1875,6 @@ export default function Home() {
     const hasVideos = mediaPool.some(m => m.type === "video");
     const mediaType: "image" | "video" | "mixed" = hasImages && hasVideos ? "mixed" : hasVideos ? "video" : "image";
 
-    // For images: each image is a separate "group" (1 ad per image)
-    // For videos: group by prefix (aspect ratios together)
-    let groupsArray: [string, MediaFile[]][];
-    
-    if (mediaType === "image") {
-      // Each image becomes its own group
-      groupsArray = mediaPool.map(m => [m.name, [m]] as [string, MediaFile[]]);
-    } else {
-      // Videos: group by prefix
-      const groups = groupMediaByPrefix(mediaPool);
-      groupsArray = Array.from(groups.entries());
-    }
-
-    const newAdSets: AdSetData[] = [];
-    let groupIndex = 0;
-
     // Helper to clean adset name (remove aspect ratio suffixes)
     const cleanAdsetName = (name: string): string => {
       return name
@@ -1911,59 +1895,35 @@ export default function Home() {
       }
     };
 
-    for (let i = 0; i < numAdSets; i++) {
-      const ads: AdData[] = [];
-      
-      for (let j = 0; j < adsPerAdSet && groupIndex < groupsArray.length; j++) {
-        const [prefix, media] = groupsArray[groupIndex];
-        const isVideoGroup = media.some(m => m.type === 'video');
-        const firstMediaName = media[0]?.name || prefix;
-        
-        ads.push({
-          id: `ad-${Date.now()}-${groupIndex}`,
-          adName: composeAdName(firstMediaName, j, isVideoGroup),
-          hook: "",
-          primaryText: "",
-          media,
-          status: "idle",
-        });
-        groupIndex++;
-      }
+    const newAdSets: AdSetData[] = [];
 
-      if (ads.length > 0) {
-        // Generate AdSet name from video pattern
-        // Example: T4_C1_E1_AD2_HOOK1_EVA_1, T4_C1_E1_AD2_HOOK2_EVA_1 → T4_C1_E1_AD2_EVA_1_HOOK1-2
-        const generateAdSetName = (adsInSet: AdData[]): string => {
-          const allMediaNames = adsInSet.flatMap(ad => ad.media.map(m => m.name.replace(/\.[^/.]+$/, '').toUpperCase()));
-          
-          // Try to extract HOOK numbers from video names
-          const hookPattern = /^(.+?)_HOOK(\d+)_(.+)$/;
-          const hookMatches = allMediaNames.map(name => name.match(hookPattern)).filter(Boolean);
-          
-          if (hookMatches.length > 0) {
-            // Extract prefix, hook numbers, and suffix
-            const prefix = hookMatches[0]![1];
-            const suffix = hookMatches[0]![3];
-            const hookNumbers = hookMatches.map(m => parseInt(m![2])).sort((a, b) => a - b);
-            
-            // Check if all have same prefix and suffix
-            const allSamePattern = hookMatches.every(m => m![1] === prefix && m![3] === suffix);
-            
-            if (allSamePattern && hookNumbers.length > 0) {
-              const minHook = Math.min(...hookNumbers);
-              const maxHook = Math.max(...hookNumbers);
-              // Format: PREFIX_SUFFIX_HOOKmin-max
-              return `${prefix}_${suffix}_HOOK${minHook}-${maxHook}`;
-            }
-          }
-          
-          // Fallback: use first media name cleaned
-          const firstMediaName = adsInSet[0]?.media[0]?.name || `Ad Set ${i + 1}`;
-          const rawAdsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
-          return cleanAdsetName(rawAdsetName);
-        };
+    if (mediaType === "image") {
+      // IMAGE LOGIC:
+      // - Each image = 1 AdSet
+      // - adsPerAdSet = number of hooks per image
+      // - numAdSets determines how many images to use (if less than total images)
+      // - If numAdSets > images, use all images
+      // - If numAdSets < images, distribute images across adsets
+      
+      const imagesToUse = Math.min(numAdSets, mediaPool.length);
+      
+      for (let i = 0; i < imagesToUse; i++) {
+        const image = mediaPool[i];
+        const ads: AdData[] = [];
         
-        const adsetName = generateAdSetName(ads);
+        // Create N ads (hooks) for this image
+        for (let hookIdx = 0; hookIdx < adsPerAdSet; hookIdx++) {
+          ads.push({
+            id: `ad-${Date.now()}-${i}-${hookIdx}`,
+            adName: composeAdName(image.name, hookIdx, false),
+            hook: "",
+            primaryText: "",
+            media: [image], // Same image for all hooks
+            status: "idle",
+          });
+        }
+        
+        const adsetName = cleanAdsetName(image.name.replace(/\.[^/.]+$/, "").toUpperCase());
         
         newAdSets.push({
           id: `adset-${Date.now()}-${i}`,
@@ -1981,6 +1941,85 @@ export default function Home() {
           scheduleDate: getTomorrowDate(),
           scheduleTime: "00:05",
         });
+      }
+      
+      // If user selected more adsets than images, show info
+      if (numAdSets > mediaPool.length) {
+        toast.info(`Only ${mediaPool.length} images available, created ${mediaPool.length} Ad Sets`);
+      }
+    } else {
+      // VIDEO LOGIC (unchanged):
+      // - Group videos by prefix (aspect ratios together)
+      // - Each group = 1 Ad
+      // - Distribute groups across AdSets based on numAdSets and adsPerAdSet
+      
+      const groups = groupMediaByPrefix(mediaPool);
+      const groupsArray = Array.from(groups.entries());
+      let groupIndex = 0;
+
+      for (let i = 0; i < numAdSets; i++) {
+        const ads: AdData[] = [];
+        
+        for (let j = 0; j < adsPerAdSet && groupIndex < groupsArray.length; j++) {
+          const [prefix, media] = groupsArray[groupIndex];
+          const firstMediaName = media[0]?.name || prefix;
+          
+          ads.push({
+            id: `ad-${Date.now()}-${groupIndex}`,
+            adName: composeAdName(firstMediaName, j, true),
+            hook: "",
+            primaryText: "",
+            media,
+            status: "idle",
+          });
+          groupIndex++;
+        }
+
+        if (ads.length > 0) {
+          // Generate AdSet name from video pattern
+          const generateAdSetName = (adsInSet: AdData[]): string => {
+            const allMediaNames = adsInSet.flatMap(ad => ad.media.map(m => m.name.replace(/\.[^/.]+$/, '').toUpperCase()));
+            
+            const hookPattern = /^(.+?)_HOOK(\d+)_(.+)$/;
+            const hookMatches = allMediaNames.map(name => name.match(hookPattern)).filter(Boolean);
+            
+            if (hookMatches.length > 0) {
+              const prefix = hookMatches[0]![1];
+              const suffix = hookMatches[0]![3];
+              const hookNumbers = hookMatches.map(m => parseInt(m![2])).sort((a, b) => a - b);
+              const allSamePattern = hookMatches.every(m => m![1] === prefix && m![3] === suffix);
+              
+              if (allSamePattern && hookNumbers.length > 0) {
+                const minHook = Math.min(...hookNumbers);
+                const maxHook = Math.max(...hookNumbers);
+                return `${prefix}_${suffix}_HOOK${minHook}-${maxHook}`;
+              }
+            }
+            
+            const firstMediaName = adsInSet[0]?.media[0]?.name || `Ad Set ${i + 1}`;
+            const rawAdsetName = firstMediaName.replace(/\.[^/.]+$/, "").toUpperCase();
+            return cleanAdsetName(rawAdsetName);
+          };
+          
+          const adsetName = generateAdSetName(ads);
+          
+          newAdSets.push({
+            id: `adset-${Date.now()}-${i}`,
+            name: adsetName,
+            ads,
+            sharedBody: "",
+            sharedHeadline: adDetailsQuery.data?.headline || "",
+            sharedUrl: adDetailsQuery.data?.url || "",
+            sharedPageId: adDetailsQuery.data?.pageId || (pagesQuery.data?.[0]?.id || ""),
+            sharedPostComment: "",
+            status: "idle",
+            isExpanded: true,
+            mediaType,
+            scheduleEnabled: false,
+            scheduleDate: getTomorrowDate(),
+            scheduleTime: "00:05",
+          });
+        }
       }
     }
 
