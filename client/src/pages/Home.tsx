@@ -2335,6 +2335,8 @@ export default function Home() {
             }
             if (adResult.commentPosted) {
               addProgressLog(`    💬 Comment posted successfully!`);
+            } else if (adSet.sharedPostComment) {
+              addProgressLog(`    ⚠️ Comment not posted (may need retry)`);
             }
           } else {
             addProgressLog(`  ✗ Ad "${ad.adName}" failed: ${adResult?.error || "Unknown error"}`);
