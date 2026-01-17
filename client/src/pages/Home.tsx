@@ -412,6 +412,7 @@ export default function Home() {
 
   // Mutation to save Facebook token
   const saveTokenMutation = trpc.meta.saveFacebookToken.useMutation();
+  const clearTokenMutation = trpc.meta.clearToken.useMutation();
 
   // Mutation to save ad account settings
   const saveAdAccountSettingsMutation = trpc.meta.saveAdAccountSettings.useMutation();
@@ -2183,6 +2184,16 @@ export default function Home() {
 
     for (let adSetIndex = 0; adSetIndex < adSetsWithAds.length; adSetIndex++) {
       const adSet = adSetsWithAds[adSetIndex];
+      
+      // Debug: Log all adSet fields
+      console.log('AdSet being processed:', JSON.stringify({
+        id: adSet.id,
+        name: adSet.name,
+        sharedPostComment: adSet.sharedPostComment,
+        sharedPageId: adSet.sharedPageId,
+        sharedHeadline: adSet.sharedHeadline,
+        sharedUrl: adSet.sharedUrl,
+      }, null, 2));
       setAdSetsPreview((prev) =>
         prev.map((as) => (as.id === adSet.id ? { ...as, status: "creating" } : as))
       );
@@ -2309,6 +2320,7 @@ export default function Home() {
         }));
 
         addProgressLog(`  → Creating ads via Meta API...`);
+        addProgressLog(`  → Post Comment value: "${adSet.sharedPostComment || '(empty)'}"`);
         if (adSet.sharedPostComment?.trim()) {
           addProgressLog(`  → Will auto-post comment on each ad`);
         }
@@ -2336,7 +2348,8 @@ export default function Home() {
             if (adResult.commentPosted) {
               addProgressLog(`    💬 Comment posted successfully!`);
             } else if (adSet.sharedPostComment) {
-              addProgressLog(`    ⚠️ Comment not posted (may need retry)`);
+              const errorMsg = (adResult as any).commentError || 'Unknown reason';
+              addProgressLog(`    ⚠️ Comment not posted: ${errorMsg}`);
             }
           } else {
             addProgressLog(`  ✗ Ad "${ad.adName}" failed: ${adResult?.error || "Unknown error"}`);
@@ -2589,8 +2602,8 @@ export default function Home() {
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs text-red-600 hover:text-red-800 hover:bg-red-50"
-                  onClick={() => {
-                    // Disconnect Facebook
+                  onClick={async () => {
+                    // Disconnect Facebook - clear from both localStorage AND database
                     setFbConnected(false);
                     setFbAccessToken(null);
                     setAllAdAccounts([]);
@@ -2600,6 +2613,8 @@ export default function Home() {
                     localStorage.removeItem(LS_KEYS.FB_CONNECTED);
                     localStorage.removeItem(LS_KEYS.SELECTED_AD_ACCOUNT);
                     localStorage.removeItem(LS_KEYS.ENABLED_AD_ACCOUNTS);
+                    // Also clear from database to prevent auto-reconnect
+                    clearTokenMutation.mutate();
                     toast.success('Facebook disconnected');
                   }}
                 >

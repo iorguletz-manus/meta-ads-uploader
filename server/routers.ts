@@ -1604,7 +1604,7 @@ export const appRouter = router({
         console.log("[STEP 4] ======== CREATING ADS IN NEW AD SET ========");
         console.log("[STEP 4] Total ads to create:", input.ads.length);
         
-        const results: Array<{ adName: string; success: boolean; adId?: string; error?: string; postUrl?: string; commentPosted?: boolean }> = [];
+        const results: Array<{ adName: string; success: boolean; adId?: string; error?: string; postUrl?: string; commentPosted?: boolean; commentError?: string }> = [];
         let adIndex = 0;
         
         for (const ad of input.ads) {
@@ -2083,6 +2083,7 @@ export const appRouter = router({
             let postUrl = "";
             let commentPosted = false;
             let effectiveObjectStoryId = "";
+            let commentError = "";
             
             // Retry delays: 2s, then 5s, then 5s (total max 12s wait)
             const retryDelays = [2000, 5000, 5000];
@@ -2160,7 +2161,7 @@ export const appRouter = router({
                     console.log(`[STEP 4.${adIndex}g] Comment posted successfully! ID: ${commentResult.id}`);
                     commentPosted = true;
                   } else {
-                    const commentError = await commentResponse.text();
+                    commentError = await commentResponse.text();
                     console.error(`[STEP 4.${adIndex}g] Failed to post comment: ${commentError}`);
                   }
                 }
@@ -2173,7 +2174,7 @@ export const appRouter = router({
             
             console.log(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} COMPLETED SUCCESSFULLY ########\n`);
             
-            results.push({ adName: ad.adName, success: true, adId: newAd.id, postUrl, commentPosted });
+            results.push({ adName: ad.adName, success: true, adId: newAd.id, postUrl, commentPosted, commentError: commentError || undefined });
             adSuccess = true; // Mark as successful to exit retry loop
             
           } catch (error) {
