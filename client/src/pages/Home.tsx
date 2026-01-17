@@ -1650,7 +1650,7 @@ export default function Home() {
           const result = await uploadImageToMetaMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
-            imageBase64: media.base64,
+            base64Data: media.base64, // Backend expects base64Data not imageBase64
             fileName: media.name,
           });
           
