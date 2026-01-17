@@ -1,0 +1,1 @@
+ALTER TABLE `ad_presets` ADD `postComment` text;

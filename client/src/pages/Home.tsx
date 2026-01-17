@@ -136,6 +136,7 @@ interface AdSetData {
   sharedHeadline: string;
   sharedUrl: string;
   sharedPageId: string; // Facebook Page ID
+  sharedPostComment: string; // Comment to post on each created ad
   status: "idle" | "creating" | "success" | "error";
   createdAdSetId?: string;
   isExpanded: boolean;
@@ -537,6 +538,7 @@ export default function Home() {
   const [newPresetHeadline, setNewPresetHeadline] = useState("");
   const [newPresetUrl, setNewPresetUrl] = useState("");
   const [newPresetPageId, setNewPresetPageId] = useState("");
+  const [newPresetPostComment, setNewPresetPostComment] = useState("");
 
   // When ad accounts load
   useEffect(() => {
@@ -1938,6 +1940,7 @@ export default function Home() {
           sharedHeadline: adDetailsQuery.data?.headline || "",
           sharedUrl: adDetailsQuery.data?.url || "",
           sharedPageId: adDetailsQuery.data?.pageId || (pagesQuery.data?.[0]?.id || ""),
+          sharedPostComment: "",
           status: "idle",
           isExpanded: true,
           mediaType,
@@ -2176,6 +2179,9 @@ export default function Home() {
         }));
 
         addProgressLog(`  → Creating ads via Meta API...`);
+        if (adSet.sharedPostComment?.trim()) {
+          addProgressLog(`  → Will auto-post comment on each ad`);
+        }
         
         const result = await batchCreateAdsMutation.mutateAsync({
           accessToken: fbAccessToken,
@@ -2183,6 +2189,8 @@ export default function Home() {
           newAdSetName: adSet.name,
           ads: adsToCreate,
           scheduledTime: scheduledTime ? new Date(scheduledTime * 1000).toISOString() : undefined,
+          pageId: adSet.sharedPageId || undefined,
+          postComment: adSet.sharedPostComment?.trim() || undefined,
         });
 
         const updatedAds = adSet.ads.map((ad, idx) => {
@@ -2192,6 +2200,12 @@ export default function Home() {
           
           if (adResult?.success) {
             addProgressLog(`  ✓ Ad "${ad.adName}" created successfully (ID: ${adResult.adId})`);
+            if (adResult.postUrl) {
+              addProgressLog(`    📍 Post URL: ${adResult.postUrl}`);
+            }
+            if (adResult.commentPosted) {
+              addProgressLog(`    💬 Comment posted successfully!`);
+            }
           } else {
             addProgressLog(`  ✗ Ad "${ad.adName}" failed: ${adResult?.error || "Unknown error"}`);
           }
@@ -2302,6 +2316,7 @@ export default function Home() {
         ads: adsToCreate,
         scheduledTime: scheduledTime ? new Date(scheduledTime * 1000).toISOString() : undefined,
         pageId: adSet.sharedPageId || undefined, // Use selected page if provided
+        postComment: adSet.sharedPostComment?.trim() || undefined, // Auto-post comment on each ad
       });
 
       const updatedAds = adSet.ads.map((ad, idx) => {
@@ -3466,18 +3481,39 @@ export default function Home() {
                           </div>
                           <div>
                             <Label className="text-[10px] text-muted-foreground">Facebook Page</Label>
-                            <select
-                              value={adSet.sharedPageId}
-                              onChange={(e) => updateAdSet(adSet.id, "sharedPageId", e.target.value)}
-                              className="w-full h-6 text-xs border rounded px-2 bg-background"
-                            >
-                              <option value="">Select a page...</option>
-                              {pagesQuery.data?.map((page) => (
-                                <option key={page.id} value={page.id}>
-                                  {page.name}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="flex items-center gap-2">
+                              {/* Page avatar */}
+                              {adSet.sharedPageId && pagesQuery.data?.find(p => p.id === adSet.sharedPageId)?.picture?.data?.url && (
+                                <img 
+                                  src={pagesQuery.data?.find(p => p.id === adSet.sharedPageId)?.picture?.data?.url}
+                                  alt=""
+                                  className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                                />
+                              )}
+                              <select
+                                value={adSet.sharedPageId}
+                                onChange={(e) => updateAdSet(adSet.id, "sharedPageId", e.target.value)}
+                                className="w-32 h-6 text-xs border rounded px-2 bg-background"
+                              >
+                                <option value="">Select...</option>
+                                {pagesQuery.data?.map((page) => (
+                                  <option key={page.id} value={page.id}>
+                                    {page.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          
+                          {/* Post Comment Section */}
+                          <div className="col-span-3">
+                            <Label className="text-[10px] text-muted-foreground">Post Comment (auto-posted on each ad)</Label>
+                            <Textarea
+                              value={adSet.sharedPostComment}
+                              onChange={(e) => updateAdSet(adSet.id, "sharedPostComment", e.target.value)}
+                              className="h-16 text-xs resize-none"
+                              placeholder="Comment to post on each created ad (optional)..."
+                            />
                           </div>
                           
                           {/* Presets Section */}
@@ -3495,11 +3531,12 @@ export default function Home() {
                                       if (preset.headline) updateAdSet(adSet.id, "sharedHeadline", preset.headline);
                                       if (preset.url) updateAdSet(adSet.id, "sharedUrl", preset.url);
                                       if (preset.fbPageId) updateAdSet(adSet.id, "sharedPageId", preset.fbPageId);
+                                      if (preset.postComment) updateAdSet(adSet.id, "sharedPostComment", preset.postComment);
                                       toast.success(`Applied preset: ${preset.name}`);
                                     }
                                   }
                                 }}
-                                className="flex-1 h-6 text-xs border rounded px-2 bg-background"
+                                className="w-32 h-6 text-xs border rounded px-2 bg-background"
                               >
                                 <option value="">(none)</option>
                                 {presetsQuery.data?.map((preset) => (
@@ -3516,6 +3553,7 @@ export default function Home() {
                                   setNewPresetHeadline(adSet.sharedHeadline);
                                   setNewPresetUrl(adSet.sharedUrl);
                                   setNewPresetPageId(adSet.sharedPageId);
+                                  setNewPresetPostComment(adSet.sharedPostComment);
                                   setShowNewPresetDialog(true);
                                 }}
                               >
@@ -3785,7 +3823,7 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>Create New Preset</DialogTitle>
             <DialogDescription>
-              Save current Headline, URL, and FB Page as a preset for quick reuse.
+              Save current Headline, URL, FB Page and Post Comment as a preset for quick reuse.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -3831,6 +3869,15 @@ export default function Home() {
                 ))}
               </select>
             </div>
+            <div>
+              <Label className="text-sm">Post Comment</Label>
+              <Textarea
+                value={newPresetPostComment}
+                onChange={(e) => setNewPresetPostComment(e.target.value)}
+                placeholder="Comment to auto-post on each ad..."
+                className="mt-1 h-20 resize-none"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewPresetDialog(false)}>
@@ -3849,9 +3896,11 @@ export default function Home() {
                   url: newPresetUrl,
                   fbPageId: newPresetPageId,
                   fbPageName: pageName,
+                  postComment: newPresetPostComment,
                 });
                 setShowNewPresetDialog(false);
                 setNewPresetName("");
+                setNewPresetPostComment("");
               }}
               disabled={createPresetMutation.isPending}
             >

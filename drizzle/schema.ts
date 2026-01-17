@@ -50,6 +50,7 @@ export const adPresets = mysqlTable("ad_presets", {
   url: text("url"),
   fbPageId: varchar("fbPageId", { length: 64 }),
   fbPageName: varchar("fbPageName", { length: 255 }),
+  postComment: text("postComment"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

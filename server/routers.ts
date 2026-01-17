@@ -1431,6 +1431,7 @@ export const appRouter = router({
         newAdSetName: z.string(),
         scheduledTime: z.string().optional(), // ISO timestamp for scheduled publish
         pageId: z.string().optional(), // Optional: override page ID from template
+        postComment: z.string().optional(), // Optional: comment to post on each created ad
         ads: z.array(z.object({
           adName: z.string(),
           primaryText: z.string(),
@@ -1603,7 +1604,7 @@ export const appRouter = router({
         console.log("[STEP 4] ======== CREATING ADS IN NEW AD SET ========");
         console.log("[STEP 4] Total ads to create:", input.ads.length);
         
-        const results: Array<{ adName: string; success: boolean; adId?: string; error?: string }> = [];
+        const results: Array<{ adName: string; success: boolean; adId?: string; error?: string; postUrl?: string; commentPosted?: boolean }> = [];
         let adIndex = 0;
         
         for (const ad of input.ads) {
@@ -2077,9 +2078,83 @@ export const appRouter = router({
             console.log(`[STEP 4.${adIndex}e] SUCCESS - Ad created!`);
             console.log(`[STEP 4.${adIndex}e] Ad ID: ${newAd.id}`);
             console.log(`[STEP 4.${adIndex}e] Full response: ${JSON.stringify(newAd, null, 2)}`);
+            
+            // STEP 4f: Get post URL from creative's effective_object_story_id with retry logic
+            let postUrl = "";
+            let commentPosted = false;
+            let effectiveObjectStoryId = "";
+            
+            // Retry delays: 2s, then 5s, then 5s (total max 12s wait)
+            const retryDelays = [2000, 5000, 5000];
+            
+            try {
+              console.log(`\n[STEP 4.${adIndex}f] -------- GETTING POST URL (with retry) --------`);
+              
+              for (let retryAttempt = 0; retryAttempt <= retryDelays.length; retryAttempt++) {
+                // Wait before checking (except first attempt)
+                if (retryAttempt > 0) {
+                  const delay = retryDelays[retryAttempt - 1];
+                  console.log(`[STEP 4.${adIndex}f] Waiting ${delay/1000}s before retry ${retryAttempt}...`);
+                  await new Promise(resolve => setTimeout(resolve, delay));
+                }
+                
+                const creativeDetails = await metaApiRequest(
+                  `/${newCreative.id}?fields=effective_object_story_id`,
+                  input.accessToken
+                );
+                console.log(`[STEP 4.${adIndex}f] Attempt ${retryAttempt + 1}: Creative details:`, JSON.stringify(creativeDetails, null, 2));
+                
+                if (creativeDetails.effective_object_story_id) {
+                  effectiveObjectStoryId = creativeDetails.effective_object_story_id;
+                  console.log(`[STEP 4.${adIndex}f] SUCCESS! Got effective_object_story_id: ${effectiveObjectStoryId}`);
+                  break;
+                } else {
+                  console.log(`[STEP 4.${adIndex}f] Attempt ${retryAttempt + 1}: No effective_object_story_id yet...`);
+                  if (retryAttempt === retryDelays.length) {
+                    console.log(`[STEP 4.${adIndex}f] All ${retryDelays.length + 1} attempts exhausted. Proceeding without post URL.`);
+                  }
+                }
+              }
+              
+              if (effectiveObjectStoryId) {
+                // Format: PageID_PostID
+                const [postPageId, postId] = effectiveObjectStoryId.split('_');
+                postUrl = `https://www.facebook.com/${postPageId}/posts/${postId}/`;
+                console.log(`[STEP 4.${adIndex}f] Post URL: ${postUrl}`);
+                
+                // STEP 4g: Post comment if provided
+                if (input.postComment && input.postComment.trim()) {
+                  console.log(`\n[STEP 4.${adIndex}g] -------- POSTING COMMENT --------`);
+                  console.log(`[STEP 4.${adIndex}g] Comment text: ${input.postComment.substring(0, 50)}...`);
+                  
+                  const commentResponse = await fetch(
+                    `${META_API_BASE}/${effectiveObjectStoryId}/comments?access_token=${input.accessToken}`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                      body: new URLSearchParams({ message: input.postComment }).toString(),
+                    }
+                  );
+                  
+                  if (commentResponse.ok) {
+                    const commentResult = await commentResponse.json();
+                    console.log(`[STEP 4.${adIndex}g] Comment posted successfully! ID: ${commentResult.id}`);
+                    commentPosted = true;
+                  } else {
+                    const commentError = await commentResponse.text();
+                    console.error(`[STEP 4.${adIndex}g] Failed to post comment: ${commentError}`);
+                  }
+                }
+              } else {
+                console.log(`[STEP 4.${adIndex}f] No effective_object_story_id found after all retries`);
+              }
+            } catch (postError) {
+              console.error(`[STEP 4.${adIndex}f] Error getting post URL:`, postError);
+            }
+            
             console.log(`\n[STEP 4.${adIndex}] ######## AD ${adIndex} COMPLETED SUCCESSFULLY ########\n`);
             
-            results.push({ adName: ad.adName, success: true, adId: newAd.id });
+            results.push({ adName: ad.adName, success: true, adId: newAd.id, postUrl, commentPosted });
             adSuccess = true; // Mark as successful to exit retry loop
             
           } catch (error) {
@@ -2674,6 +2749,7 @@ export const appRouter = router({
         url: z.string().optional(),
         fbPageId: z.string().optional(),
         fbPageName: z.string().optional(),
+        postComment: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const db = await getDb();
@@ -2688,6 +2764,7 @@ export const appRouter = router({
           url: input.url || null,
           fbPageId: input.fbPageId || null,
           fbPageName: input.fbPageName || null,
+          postComment: input.postComment || null,
         });
         
         return { success: true, id: Number(result[0].insertId) };
@@ -2702,6 +2779,7 @@ export const appRouter = router({
         url: z.string().optional(),
         fbPageId: z.string().optional(),
         fbPageName: z.string().optional(),
+        postComment: z.string().optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const db = await getDb();
@@ -2715,6 +2793,7 @@ export const appRouter = router({
         if (input.url !== undefined) updateData.url = input.url || null;
         if (input.fbPageId !== undefined) updateData.fbPageId = input.fbPageId || null;
         if (input.fbPageName !== undefined) updateData.fbPageName = input.fbPageName || null;
+        if (input.postComment !== undefined) updateData.postComment = input.postComment || null;
         
         await db
           .update(adPresets)

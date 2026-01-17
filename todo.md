@@ -739,3 +739,35 @@
   - Added "+ New" button to create preset from current values
   - Added delete button for selected preset
   - Selecting a preset auto-fills Headline, URL, and FB Page
+
+
+## Feature/Bug Fixes - Round 31
+
+### Tasks
+- [ ] Post Comment feature - Add textarea in Step 4 for auto-commenting on created ads
+  - [ ] Extract effective_object_story_id after ad creation
+  - [ ] Build public URL: https://www.facebook.com/{PageID}/posts/{PostID}/
+  - [ ] Post comment with FB Page using Graph API
+  - [ ] Add Post Comment to Presets (DB column)
+- [ ] UI improvements - FB Page & Presets
+  - [ ] Add avatar/thumbnail for FB Page in dropdown
+  - [ ] Resize FB Page and Presets inputs to ~10% width
+- [ ] Investigate description parameter - why some ads have description when template didn't
+- [ ] Verify schedule status logic - ACTIVE with schedule, PAUSED without
+
+
+## Post Comment Feature - Round 31
+
+### Backend
+- [x] Add retry logic for effective_object_story_id polling (2s, then 5s, then 5s)
+- [x] Extract effective_object_story_id from ad creative after creation
+- [x] Construct public URL format: https://www.facebook.com/{PageID}/posts/{PostID}/
+- [x] Post comment using FB Page after ad creation
+- [x] Add postComment field to database presets table
+
+### Frontend
+- [x] Add Post Comment textarea in Step 4 (shared for all ads in adset)
+- [x] Add Post Comment field to Presets system (save/load)
+- [x] Display post results (postUrl, commentPosted) in creation logs
+- [x] Add FB Page avatar/thumbnail in dropdown
+- [x] Reduce width of FB Page and Presets inputs to ~10% of current size
