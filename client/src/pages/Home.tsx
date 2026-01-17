@@ -1647,10 +1647,27 @@ export default function Home() {
         } else if (media.type === 'image') {
           // Local file - Upload image to Meta via base64
           console.log(`[Upload ${index}] Local image: ${media.name}`);
+          
+          // Get base64 data - either from existing base64 or convert from originalFile
+          let base64Data = media.base64;
+          if (!base64Data && media.originalFile) {
+            console.log(`[Upload ${index}] Converting originalFile to base64...`);
+            base64Data = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(media.originalFile!);
+            });
+          }
+          
+          if (!base64Data) {
+            throw new Error('No image data available for upload');
+          }
+          
           const result = await uploadImageToMetaMutation.mutateAsync({
             accessToken: fbAccessToken,
             adAccountId: selectedAdAccount,
-            base64Data: media.base64, // Backend expects base64Data not imageBase64
+            base64Data: base64Data,
             fileName: media.name,
           });
           
