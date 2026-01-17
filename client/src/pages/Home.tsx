@@ -28,7 +28,7 @@ import {
   AlignLeft,
   Info,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
 import { toast } from "sonner";
 
 // Google API constants
@@ -135,6 +135,7 @@ interface AdSetData {
   sharedBody: string;
   sharedHeadline: string;
   sharedUrl: string;
+  sharedPageId: string; // Facebook Page ID
   status: "idle" | "creating" | "success" | "error";
   createdAdSetId?: string;
   isExpanded: boolean;
@@ -426,6 +427,10 @@ export default function Home() {
   });
   const saveGoogleTokenMutation = (trpc as any).google?.saveToken?.useMutation();
   const clearGoogleTokenMutation = (trpc as any).google?.clearToken?.useMutation();
+  
+  // Google Drive public files mutations
+  const downloadPublicFilesMutation = (trpc as any).google?.downloadPublicFiles?.useMutation();
+  const bunnyFetchFilesMutation = (trpc as any).google?.bunnyFetchFiles?.useMutation();
 
   // State for upload progress
   const [isUploadingToMeta, setIsUploadingToMeta] = useState(false);
@@ -503,6 +508,35 @@ export default function Home() {
     { accessToken: fbAccessToken || "" },
     { enabled: !!fbAccessToken && fbConnected }
   );
+
+  // Get Facebook Pages
+  const pagesQuery = trpc.meta.getPages.useQuery(
+    { accessToken: fbAccessToken || "" },
+    { enabled: !!fbAccessToken && fbConnected }
+  );
+
+  // Get user presets
+  const presetsQuery = trpc.presets.getAll.useQuery();
+  const createPresetMutation = trpc.presets.create.useMutation({
+    onSuccess: () => {
+      presetsQuery.refetch();
+      toast.success("Preset saved!");
+    },
+  });
+  const deletePresetMutation = trpc.presets.delete.useMutation({
+    onSuccess: () => {
+      presetsQuery.refetch();
+      toast.success("Preset deleted");
+    },
+  });
+
+  // Preset state
+  const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
+  const [showNewPresetDialog, setShowNewPresetDialog] = useState(false);
+  const [newPresetName, setNewPresetName] = useState("");
+  const [newPresetHeadline, setNewPresetHeadline] = useState("");
+  const [newPresetUrl, setNewPresetUrl] = useState("");
+  const [newPresetPageId, setNewPresetPageId] = useState("");
 
   // When ad accounts load
   useEffect(() => {
@@ -1141,7 +1175,10 @@ export default function Home() {
     
     try {
       // Call backend to download and upload files
-      const result = await (trpc as any).google.downloadPublicFiles.mutate({ links });
+      if (!downloadPublicFilesMutation) {
+        throw new Error('Download public files not available');
+      }
+      const result = await downloadPublicFilesMutation.mutateAsync({ links });
       
       console.log("[PublicLinks] Backend result:", result);
       
@@ -1222,7 +1259,10 @@ export default function Home() {
     try {
       // Call backend - Bunny will fetch directly from Google Drive
       // waitForProcessing: true means we wait for Bunny to finish processing
-      const result = await (trpc as any).google.bunnyFetchFiles.mutate({ 
+      if (!bunnyFetchFilesMutation) {
+        throw new Error('Bunny Fetch not available');
+      }
+      const result = await bunnyFetchFilesMutation.mutateAsync({ 
         links,
         waitForProcessing: true // Wait for videos to be ready
       });
@@ -1703,6 +1743,28 @@ export default function Home() {
               uploadProgress: 100,
             });
             updateProgress('completed');
+          } else if (media.cdnUrl) {
+            // Video from Bunny Stream or CDN - use URL upload
+            console.log(`[Upload ${index}] CDN video (Bunny Stream): ${media.name}`);
+            console.log(`[Upload ${index}] CDN URL: ${media.cdnUrl}`);
+            
+            const result = await uploadFromPublicUrlMutation.mutateAsync({
+              accessToken: fbAccessToken,
+              adAccountId: selectedAdAccount,
+              fileUrl: media.cdnUrl,
+              fileName: media.name,
+              isVideo: true,
+            });
+            
+            console.log(`[Upload ${index}] Meta upload success! Video ID: ${result.videoId}`);
+            
+            updateMediaItem(index, {
+              metaVideoId: result.videoId,
+              metaThumbnailUrl: result.thumbnailUrl,
+              uploadStatus: 'success',
+              uploadProgress: 100,
+            });
+            updateProgress('completed');
           } else if (media.base64) {
             // Fallback to base64 for smaller files
             const result = await uploadVideoToMetaMutation.mutateAsync({
@@ -1875,6 +1937,7 @@ export default function Home() {
           sharedBody: "",
           sharedHeadline: adDetailsQuery.data?.headline || "",
           sharedUrl: adDetailsQuery.data?.url || "",
+          sharedPageId: adDetailsQuery.data?.pageId || (pagesQuery.data?.[0]?.id || ""),
           status: "idle",
           isExpanded: true,
           mediaType,
@@ -1890,22 +1953,26 @@ export default function Home() {
     toast.success(`Distributed into ${newAdSets.length} Ad Set(s)`);
   };
 
-  // Update ad set
+  // Update ad set - use startTransition to reduce input lag
   const updateAdSet = (adSetId: string, field: keyof AdSetData, value: string | boolean) => {
-    setAdSetsPreview((prev) =>
-      prev.map((as) => (as.id === adSetId ? { ...as, [field]: value } : as))
-    );
+    startTransition(() => {
+      setAdSetsPreview((prev) =>
+        prev.map((as) => (as.id === adSetId ? { ...as, [field]: value } : as))
+      );
+    });
   };
 
-  // Update ad in ad set
+  // Update ad in ad set - use startTransition to reduce input lag
   const updateAd = (adSetId: string, adId: string, field: keyof AdData, value: string) => {
-    setAdSetsPreview((prev) =>
-      prev.map((as) =>
-        as.id === adSetId
-          ? { ...as, ads: as.ads.map((ad) => (ad.id === adId ? { ...ad, [field]: field === "adName" ? value.toUpperCase() : value } : ad)) }
-          : as
-      )
-    );
+    startTransition(() => {
+      setAdSetsPreview((prev) =>
+        prev.map((as) =>
+          as.id === adSetId
+            ? { ...as, ads: as.ads.map((ad) => (ad.id === adId ? { ...ad, [field]: field === "adName" ? value.toUpperCase() : value } : ad)) }
+            : as
+        )
+      );
+    });
   };
 
   // Remove ad from ad set
@@ -1994,7 +2061,18 @@ export default function Home() {
         if (adSet.scheduleEnabled && adSet.scheduleDate && adSet.scheduleTime) {
           const bucharestDate = new Date(`${adSet.scheduleDate}T${adSet.scheduleTime}:00`);
           scheduledTime = Math.floor(bucharestDate.getTime() / 1000);
-          addProgressLog(`  → Scheduled for ${adSet.scheduleDate} ${adSet.scheduleTime}`);
+          // Format date as "18 January 2026, 00:05 AM"
+          const formattedDate = bucharestDate.toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+          });
+          const formattedTime = bucharestDate.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+          });
+          addProgressLog(`  → Scheduled for ${formattedDate}, ${formattedTime}`);
         }
 
         addProgressLog(`  → Preparing ${adSet.ads.length} ad(s)...`);
@@ -2223,6 +2301,7 @@ export default function Home() {
         newAdSetName: adSet.name,
         ads: adsToCreate,
         scheduledTime: scheduledTime ? new Date(scheduledTime * 1000).toISOString() : undefined,
+        pageId: adSet.sharedPageId || undefined, // Use selected page if provided
       });
 
       const updatedAds = adSet.ads.map((ad, idx) => {
@@ -3385,6 +3464,80 @@ export default function Home() {
                               placeholder="https://..."
                             />
                           </div>
+                          <div>
+                            <Label className="text-[10px] text-muted-foreground">Facebook Page</Label>
+                            <select
+                              value={adSet.sharedPageId}
+                              onChange={(e) => updateAdSet(adSet.id, "sharedPageId", e.target.value)}
+                              className="w-full h-6 text-xs border rounded px-2 bg-background"
+                            >
+                              <option value="">Select a page...</option>
+                              {pagesQuery.data?.map((page) => (
+                                <option key={page.id} value={page.id}>
+                                  {page.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          
+                          {/* Presets Section */}
+                          <div className="col-span-3 border-t pt-2 mt-2">
+                            <Label className="text-[10px] text-muted-foreground mb-1 block">Presets</Label>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={selectedPresetId || ""}
+                                onChange={(e) => {
+                                  const presetId = e.target.value ? Number(e.target.value) : null;
+                                  setSelectedPresetId(presetId);
+                                  if (presetId) {
+                                    const preset = presetsQuery.data?.find(p => p.id === presetId);
+                                    if (preset) {
+                                      if (preset.headline) updateAdSet(adSet.id, "sharedHeadline", preset.headline);
+                                      if (preset.url) updateAdSet(adSet.id, "sharedUrl", preset.url);
+                                      if (preset.fbPageId) updateAdSet(adSet.id, "sharedPageId", preset.fbPageId);
+                                      toast.success(`Applied preset: ${preset.name}`);
+                                    }
+                                  }
+                                }}
+                                className="flex-1 h-6 text-xs border rounded px-2 bg-background"
+                              >
+                                <option value="">(none)</option>
+                                {presetsQuery.data?.map((preset) => (
+                                  <option key={preset.id} value={preset.id}>
+                                    {preset.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 text-xs px-2"
+                                onClick={() => {
+                                  setNewPresetHeadline(adSet.sharedHeadline);
+                                  setNewPresetUrl(adSet.sharedUrl);
+                                  setNewPresetPageId(adSet.sharedPageId);
+                                  setShowNewPresetDialog(true);
+                                }}
+                              >
+                                + New
+                              </Button>
+                              {selectedPresetId && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 text-xs px-2 text-red-500 hover:text-red-700"
+                                  onClick={() => {
+                                    if (confirm("Delete this preset?")) {
+                                      deletePresetMutation.mutate({ id: selectedPresetId });
+                                      setSelectedPresetId(null);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -3622,6 +3775,88 @@ export default function Home() {
               Copy to Clipboard
             </Button>
             <Button onClick={() => setShowAllSettingsDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Preset Dialog */}
+      <Dialog open={showNewPresetDialog} onOpenChange={setShowNewPresetDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Preset</DialogTitle>
+            <DialogDescription>
+              Save current Headline, URL, and FB Page as a preset for quick reuse.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-sm">Preset Name *</Label>
+              <Input
+                value={newPresetName}
+                onChange={(e) => setNewPresetName(e.target.value)}
+                placeholder="e.g., Campaign A - Landing Page"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-sm">Headline</Label>
+              <Input
+                value={newPresetHeadline}
+                onChange={(e) => setNewPresetHeadline(e.target.value)}
+                placeholder="Your headline"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-sm">URL</Label>
+              <Input
+                value={newPresetUrl}
+                onChange={(e) => setNewPresetUrl(e.target.value)}
+                placeholder="https://..."
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-sm">Facebook Page</Label>
+              <select
+                value={newPresetPageId}
+                onChange={(e) => setNewPresetPageId(e.target.value)}
+                className="w-full h-9 text-sm border rounded px-2 bg-background mt-1"
+              >
+                <option value="">Select a page...</option>
+                {pagesQuery.data?.map((page) => (
+                  <option key={page.id} value={page.id}>
+                    {page.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowNewPresetDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!newPresetName.trim()) {
+                  toast.error("Please enter a preset name");
+                  return;
+                }
+                const pageName = pagesQuery.data?.find(p => p.id === newPresetPageId)?.name || "";
+                createPresetMutation.mutate({
+                  name: newPresetName,
+                  headline: newPresetHeadline,
+                  url: newPresetUrl,
+                  fbPageId: newPresetPageId,
+                  fbPageName: pageName,
+                });
+                setShowNewPresetDialog(false);
+                setNewPresetName("");
+              }}
+              disabled={createPresetMutation.isPending}
+            >
+              {createPresetMutation.isPending ? "Saving..." : "Save Preset"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -9,9 +9,9 @@ const BUNNY_CDN_URL = "https://manus.b-cdn.net";
 
 // Bunny Stream (Video Library) Integration
 // You need to create a Video Library in Bunny.net dashboard and get these values
-const BUNNY_STREAM_API_KEY = process.env.BUNNY_STREAM_API_KEY || "";
-const BUNNY_STREAM_LIBRARY_ID = process.env.BUNNY_STREAM_LIBRARY_ID || "";
-const BUNNY_STREAM_CDN_HOSTNAME = process.env.BUNNY_STREAM_CDN_HOSTNAME || ""; // e.g., "vz-abc123.b-cdn.net"
+const BUNNY_STREAM_API_KEY = process.env.BUNNY_STREAM_API_KEY || "6f4086ce-9f6b-4e45-ba25de98a150-0284-4232";
+const BUNNY_STREAM_LIBRARY_ID = process.env.BUNNY_STREAM_LIBRARY_ID || "581806";
+const BUNNY_STREAM_CDN_HOSTNAME = process.env.BUNNY_STREAM_CDN_HOSTNAME || "vz-95904c3e-9dc.b-cdn.net";
 
 // Folder for this app's files
 const APP_FOLDER = "meta-ads-uploader";
@@ -124,16 +124,24 @@ export async function uploadBufferToBunny(
     const filePath = `${APP_FOLDER}/${username}/${year}/${month}/${day}/${uniqueFileName}`;
 
     console.log(`[Bunny] Uploading buffer: ${fileName} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+    
+    const uploadUrl = `${BUNNY_STORAGE_URL}/${filePath}`;
+    console.log(`[Bunny] Upload URL: ${uploadUrl}`);
+    console.log(`[Bunny] API Key (first 10 chars): ${BUNNY_STORAGE_API_KEY.substring(0, 10)}...`);
+    console.log(`[Bunny] Content-Type: ${contentType}`);
+    console.log(`[Bunny] Buffer type: ${buffer.constructor.name}, length: ${buffer.length}`);
 
     // Upload to Bunny.net
-    const response = await fetch(`${BUNNY_STORAGE_URL}/${filePath}`, {
+    const response = await fetch(uploadUrl, {
       method: "PUT",
       headers: {
-        AccessKey: BUNNY_STORAGE_API_KEY,
+        "AccessKey": BUNNY_STORAGE_API_KEY,
         "Content-Type": contentType,
       },
       body: new Uint8Array(buffer),
     });
+    
+    console.log(`[Bunny] Response status: ${response.status}`);
 
     if (!response.ok) {
       const errorText = await response.text();

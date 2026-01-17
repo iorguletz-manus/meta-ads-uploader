@@ -1,6 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings, saveGoogleToken, getGoogleToken, clearGoogleToken, refreshGoogleAccessToken } from "./db";
+import { adPresets } from "../drizzle/schema";
+import { getDb } from "./db";
+import { eq, and } from "drizzle-orm";
 import { uploadToBunny, deleteFromBunny, uploadBufferToBunny, bunnyStreamFetchVideo, bunnyStreamWaitForVideo, isBunnyStreamConfigured } from "./bunnyStorage";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -799,6 +802,20 @@ export const appRouter = router({
         return data.data as Array<{ id: string; name: string; account_status: number }>;
       }),
 
+    // Get Facebook Pages for the user
+    getPages: protectedProcedure
+      .input(z.object({ accessToken: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          const data = await metaApiRequest("/me/accounts?fields=id,name,access_token,picture{url}", input.accessToken);
+          console.log("[getPages] Found", data.data?.length || 0, "pages");
+          return data.data as Array<{ id: string; name: string; access_token: string; picture?: { data?: { url?: string } } }>;
+        } catch (error: any) {
+          console.error("[getPages] Error:", error.message);
+          return [];
+        }
+      }),
+
     // Get campaigns for an ad account
     getCampaigns: protectedProcedure
       .input(z.object({ accessToken: z.string(), adAccountId: z.string().optional(), showInactive: z.boolean().optional() }))
@@ -940,6 +957,9 @@ export const appRouter = router({
         console.log("[getAdDetails]   degreesOfFreedomSpec:", JSON.stringify(degreesOfFreedomSpec));
         console.log("[getAdDetails]   contextualMultiAds:", JSON.stringify(contextualMultiAds));
         
+        // Extract page_id from object_story_spec
+        const pageId = ad.creative?.object_story_spec?.page_id || "";
+        
         return {
           id: ad.id,
           name: ad.name,
@@ -948,6 +968,7 @@ export const appRouter = router({
           primaryText,
           headline,
           url,
+          pageId,
           // New fields for copying template settings
           callToActionType,
           degreesOfFreedomSpec,
@@ -1409,6 +1430,7 @@ export const appRouter = router({
         templateAdId: z.string(),
         newAdSetName: z.string(),
         scheduledTime: z.string().optional(), // ISO timestamp for scheduled publish
+        pageId: z.string().optional(), // Optional: override page ID from template
         ads: z.array(z.object({
           adName: z.string(),
           primaryText: z.string(),
@@ -1457,17 +1479,17 @@ export const appRouter = router({
         console.log("[STEP 1] Ad Account ID:", adAccountId);
         console.log("[STEP 1] Original Ad Set ID:", originalAdSetId);
         
-        // Extract page ID from creative
-        let pageId = "";
-        if (templateAd.creative?.object_story_spec?.page_id) {
+        // Extract page ID from creative OR use override from input
+        let pageId = input.pageId || "";
+        if (!pageId && templateAd.creative?.object_story_spec?.page_id) {
           pageId = templateAd.creative.object_story_spec.page_id;
         }
         
-        console.log("[STEP 1] Page ID:", pageId);
+        console.log("[STEP 1] Page ID:", pageId, input.pageId ? "(from input override)" : "(from template)");
         
         if (!pageId) {
-          console.error("[STEP 1] ERROR: Could not determine page ID from template ad");
-          throw new Error("Could not determine page ID from template ad");
+          console.error("[STEP 1] ERROR: Could not determine page ID from template ad or input");
+          throw new Error("Could not determine page ID from template ad. Please select a Facebook Page.");
         }
         
         console.log("[STEP 1] ======== TEMPLATE AD INFO COMPLETE ========\n");
@@ -1484,10 +1506,15 @@ export const appRouter = router({
         console.log("[STEP 2] Original Ad Set Response:", JSON.stringify(originalAdSet, null, 2));
         console.log("[STEP 2] ======== ORIGINAL AD SET DATA COMPLETE ========\n");
         
+        // When scheduled, set status to ACTIVE so Meta will publish at the scheduled time
+        // When not scheduled, keep PAUSED for manual activation
+        const adSetStatus = input.scheduledTime ? "ACTIVE" : "PAUSED";
+        console.log("[STEP 2.5] Ad Set Status:", adSetStatus, input.scheduledTime ? "(scheduled - will auto-publish)" : "(manual activation required)");
+        
         const newAdSetData: Record<string, string> = {
           name: input.newAdSetName,
           campaign_id: originalAdSet.campaign_id,
-          status: "PAUSED",
+          status: adSetStatus,
           billing_event: originalAdSet.billing_event || "IMPRESSIONS",
           optimization_goal: originalAdSet.optimization_goal || "LINK_CLICKS",
         };
@@ -1515,6 +1542,15 @@ export const appRouter = router({
         }
         if (originalAdSet.attribution_spec) {
           newAdSetData.attribution_spec = JSON.stringify(originalAdSet.attribution_spec);
+        }
+        
+        // Add start_time for scheduled publishing
+        if (input.scheduledTime) {
+          // Convert ISO string to Unix timestamp
+          const scheduledDate = new Date(input.scheduledTime);
+          const unixTimestamp = Math.floor(scheduledDate.getTime() / 1000);
+          newAdSetData.start_time = unixTimestamp.toString();
+          console.log("[STEP 2.6] Scheduled start_time:", input.scheduledTime, "-> Unix:", unixTimestamp);
         }
         
         // STEP 3: Create new ad set
@@ -1979,19 +2015,19 @@ export const appRouter = router({
             
             // STEP 4e: Create ad
             console.log(`\n[STEP 4.${adIndex}e] -------- CREATING AD --------`);
+            // When scheduled, set status to ACTIVE so Meta will publish at the scheduled time
+            const adStatus = input.scheduledTime ? "ACTIVE" : "PAUSED";
             const adData: Record<string, string> = {
               name: ad.adName,
               adset_id: newAdSet.id,
               creative: JSON.stringify({ creative_id: newCreative.id }),
-              status: "PAUSED",
+              status: adStatus,
             };
             
-            // Add scheduled time if provided
+            // Log scheduled time if provided
             if (input.scheduledTime) {
-              const scheduledDate = new Date(input.scheduledTime);
-              adData.configured_status = "ACTIVE";
-              adData.effective_status = "SCHEDULED";
               console.log(`[STEP 4.${adIndex}e] Scheduled time: ${input.scheduledTime}`);
+              console.log(`[STEP 4.${adIndex}e] Ad status set to ACTIVE for scheduled publishing`);
             }
             
             console.log(`[STEP 4.${adIndex}e] Ad data:`);
@@ -2221,51 +2257,113 @@ export const appRouter = router({
             
             console.log(`[downloadPublicFiles] File ID: ${fileId}`);
             
-            // Get file metadata from Google Drive API
-            const metadataUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?key=${GOOGLE_API_KEY}&fields=name,mimeType,size`;
-            const metadataResponse = await fetch(metadataUrl);
-            const metadata = await metadataResponse.json();
-            
-            if (metadata.error) {
-              console.error(`[downloadPublicFiles] Metadata error:`, metadata.error);
-              results.push({
-                success: false,
-                fileName: 'unknown',
-                fileType: 'video',
-                error: metadata.error.message || 'Failed to get file metadata',
-              });
-              continue;
-            }
-            
-            const fileName = metadata.name || `file_${fileId}`;
-            const mimeType = metadata.mimeType || 'application/octet-stream';
-            const isVideo = mimeType.startsWith('video/');
-            const fileType: 'video' | 'image' = isVideo ? 'video' : 'image';
-            
-            console.log(`[downloadPublicFiles] File: ${fileName}, Type: ${mimeType}, Size: ${metadata.size}`);
-            
-            // Download file from Google Drive
-            // Use the export download URL for public files
-            const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${GOOGLE_API_KEY}`;
+            // NO Google API - it doesn't work with "Anyone with the link" files
+            // Instead, we fetch the download page and extract info from there
             
             console.log(`[downloadPublicFiles] Downloading from Google Drive...`);
-            const downloadResponse = await fetch(downloadUrl);
             
-            if (!downloadResponse.ok) {
-              const errorText = await downloadResponse.text();
-              console.error(`[downloadPublicFiles] Download failed: ${downloadResponse.status} ${errorText}`);
-              results.push({
-                success: false,
-                fileName,
-                fileType,
-                error: `Download failed: ${downloadResponse.status}`,
-              });
-              continue;
+            // Step 1: Fetch the download page to get file info and UUID (for large files)
+            const warningUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            console.log(`[downloadPublicFiles] Fetching download page: ${warningUrl}`);
+            
+            const warningResponse = await fetch(warningUrl);
+            const warningHtml = await warningResponse.text();
+            
+            // Extract filename from the page
+            // Pattern: <a href="/open?id=...">FILENAME</a> (SIZE)
+            let fileName = `file_${fileId}`;
+            const fileNameMatch = warningHtml.match(/<a href="\/open\?id=[^"]+">([^<]+)<\/a>/);
+            if (fileNameMatch) {
+              fileName = fileNameMatch[1];
+              console.log(`[downloadPublicFiles] Extracted filename from page: ${fileName}`);
+            } else {
+              console.log(`[downloadPublicFiles] Could not extract filename, using default: ${fileName}`);
             }
             
-            // Get file as buffer
-            const arrayBuffer = await downloadResponse.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            // Determine file type from extension
+            const ext = fileName.split('.').pop()?.toLowerCase() || '';
+            const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv', 'm4v'];
+            const isVideo = videoExtensions.includes(ext);
+            const fileType: 'video' | 'image' = isVideo ? 'video' : 'image';
+            const mimeType = isVideo ? 'video/mp4' : 'image/jpeg';
+            
+            let downloadResponse: Response | undefined;
+            let buffer: Buffer | undefined;
+            
+            // Check if we got a warning page (contains virus scan warning)
+            if (warningHtml.includes('Virus scan warning') || warningHtml.includes('uuid=')) {
+              console.log(`[downloadPublicFiles] Got virus scan warning page, extracting UUID...`);
+              
+              // Extract UUID from the form
+              const uuidMatch = warningHtml.match(/name="uuid"\s+value="([^"]+)"/);
+              
+              if (!uuidMatch) {
+                console.error(`[downloadPublicFiles] Could not extract UUID from warning page`);
+                results.push({
+                  success: false,
+                  fileName,
+                  fileType,
+                  error: 'Could not bypass virus scan warning',
+                });
+                continue;
+              }
+              
+              const uuid = uuidMatch[1];
+              console.log(`[downloadPublicFiles] Extracted UUID: ${uuid}`);
+              
+              // Step 2: Download with confirm and UUID
+              const downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t&uuid=${uuid}`;
+              console.log(`[downloadPublicFiles] Downloading with UUID: ${downloadUrl}`);
+              
+              downloadResponse = await fetch(downloadUrl);
+            } else {
+              // Small file - check if we got the actual file or need to use API
+              const contentType = warningResponse.headers.get('content-type');
+              
+              if (contentType && !contentType.includes('text/html')) {
+                // We got the actual file directly
+                console.log(`[downloadPublicFiles] Got file directly (small file)`);
+                const arrayBuffer = await warningResponse.arrayBuffer();
+                buffer = Buffer.from(arrayBuffer);
+              } else {
+                // Try the direct download URL
+                const downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
+                console.log(`[downloadPublicFiles] Trying direct download: ${downloadUrl}`);
+                downloadResponse = await fetch(downloadUrl);
+              }
+            }
+            
+            // Get the file buffer if we haven't already
+            if (!buffer) {
+              if (!downloadResponse!.ok) {
+                const errorText = await downloadResponse!.text();
+                console.error(`[downloadPublicFiles] Download failed: ${downloadResponse!.status} ${errorText}`);
+                results.push({
+                  success: false,
+                  fileName,
+                  fileType,
+                  error: `Download failed: ${downloadResponse!.status}`,
+                });
+                continue;
+              }
+              
+              // Check if we got HTML instead of the file
+              const contentType = downloadResponse!.headers.get('content-type');
+              if (contentType && contentType.includes('text/html')) {
+                const html = await downloadResponse!.text();
+                console.error(`[downloadPublicFiles] Got HTML instead of file:`, html.slice(0, 500));
+                results.push({
+                  success: false,
+                  fileName,
+                  fileType,
+                  error: 'Got HTML page instead of file - file may not be publicly accessible',
+                });
+                continue;
+              }
+              
+              const arrayBuffer = await downloadResponse!.arrayBuffer();
+              buffer = Buffer.from(arrayBuffer);
+            }
             
             console.log(`[downloadPublicFiles] Downloaded ${(buffer.length / 1024 / 1024).toFixed(2)} MB`);
             
@@ -2381,14 +2479,19 @@ export const appRouter = router({
             
             // Get file metadata from Google Drive API to get the filename
             const metadataUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?key=${GOOGLE_API_KEY}&fields=name,mimeType`;
+            console.log(`[bunnyFetchFiles] Fetching metadata from: ${metadataUrl}`);
             const metadataResponse = await fetch(metadataUrl);
             const metadata = await metadataResponse.json();
+            console.log(`[bunnyFetchFiles] Metadata response:`, JSON.stringify(metadata));
             
             let fileName = `video_${fileId}`;
             if (metadata.name) {
               fileName = metadata.name;
+              console.log(`[bunnyFetchFiles] Got filename from API: ${fileName}`);
             } else if (metadata.error) {
               console.warn(`[bunnyFetchFiles] Could not get metadata:`, metadata.error.message);
+              // Try alternative: use file ID as fallback
+              console.log(`[bunnyFetchFiles] Using fallback filename: ${fileName}`);
             }
             
             console.log(`[bunnyFetchFiles] File name: ${fileName}`);
@@ -2543,6 +2646,98 @@ export const appRouter = router({
           expiresIn: data.expires_in || 3600,
           hasRefreshToken: !!data.refresh_token,
         };
+      }),
+  }),
+
+  // Presets router for saving URL/Headline/FB Page combinations
+  presets: router({
+    // Get all presets for current user
+    getAll: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) {
+        return [];
+      }
+      
+      const userPresets = await db
+        .select()
+        .from(adPresets)
+        .where(eq(adPresets.userId, ctx.user.id));
+      
+      return userPresets;
+    }),
+
+    // Create a new preset
+    create: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        headline: z.string().optional(),
+        url: z.string().optional(),
+        fbPageId: z.string().optional(),
+        fbPageName: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await getDb();
+        if (!db) {
+          throw new Error("Database not available");
+        }
+        
+        const result = await db.insert(adPresets).values({
+          userId: ctx.user.id,
+          name: input.name,
+          headline: input.headline || null,
+          url: input.url || null,
+          fbPageId: input.fbPageId || null,
+          fbPageName: input.fbPageName || null,
+        });
+        
+        return { success: true, id: Number(result[0].insertId) };
+      }),
+
+    // Update a preset
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1).optional(),
+        headline: z.string().optional(),
+        url: z.string().optional(),
+        fbPageId: z.string().optional(),
+        fbPageName: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await getDb();
+        if (!db) {
+          throw new Error("Database not available");
+        }
+        
+        const updateData: Record<string, string | null> = {};
+        if (input.name !== undefined) updateData.name = input.name;
+        if (input.headline !== undefined) updateData.headline = input.headline || null;
+        if (input.url !== undefined) updateData.url = input.url || null;
+        if (input.fbPageId !== undefined) updateData.fbPageId = input.fbPageId || null;
+        if (input.fbPageName !== undefined) updateData.fbPageName = input.fbPageName || null;
+        
+        await db
+          .update(adPresets)
+          .set(updateData)
+          .where(and(eq(adPresets.id, input.id), eq(adPresets.userId, ctx.user.id)));
+        
+        return { success: true };
+      }),
+
+    // Delete a preset
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await getDb();
+        if (!db) {
+          throw new Error("Database not available");
+        }
+        
+        await db
+          .delete(adPresets)
+          .where(and(eq(adPresets.id, input.id), eq(adPresets.userId, ctx.user.id)));
+        
+        return { success: true };
       }),
   }),
 });

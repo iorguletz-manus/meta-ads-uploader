@@ -39,4 +39,20 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+/**
+ * Ad Presets table for storing reusable URL/Headline/FB Page combinations
+ */
+export const adPresets = mysqlTable("ad_presets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  headline: text("headline"),
+  url: text("url"),
+  fbPageId: varchar("fbPageId", { length: 64 }),
+  fbPageName: varchar("fbPageName", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AdPreset = typeof adPresets.$inferSelect;
+export type InsertAdPreset = typeof adPresets.$inferInsert;

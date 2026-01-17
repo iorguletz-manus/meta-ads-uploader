@@ -690,3 +690,52 @@
 - [x] Poll Bunny for video status until ready (waitForProcessing option)
 - [x] Add completed videos to media pool with directPlayUrl and thumbnailUrl
 - [x] Write vitest tests for the new endpoint (7 tests passing)
+
+
+## Bug Fix - Round 28
+
+- [x] Fix: #4 Bunny Fetch error "n[u] is not a function" (minified: "hooks[lastArg] is not a function")
+  - Changed from direct `.mutate()` call to using `useMutation` hook with `.mutateAsync()`
+  - Added `downloadPublicFilesMutation` and `bunnyFetchFilesMutation` hooks
+  - Also fixed #3 Public Links to use the same pattern
+
+
+## Bug Fix - Round 29
+
+- [ ] Fix: #4 Bunny Fetch - video name shows random GUID instead of original filename from Google Drive
+
+- [ ] Fix: #4 Bunny Fetch - Upload to Meta fails silently (0 uploaded, 1 failed, no logs)
+
+
+## Feature/Bug Fixes - Round 30
+
+- [ ] #1: Add FB Page selector dropdown in Step 4 (fetch from connected Facebook pages)
+- [ ] #2: Fix input lag/delay issue when pasting/deleting text in inputs
+- [ ] #3: Fix date format for schedule - change from "2026-01-18 00:05" to "18 January 2026, 00:05 AM"
+- [ ] #4: Fix schedule functionality in both locations in Step 4
+- [ ] #5: Add Presets system for URL/Headline/FB Page with database storage
+
+
+## Feature/Bug Fixes - Round 30 (COMPLETED)
+
+### Tasks
+- [x] FB Page selector - Add dropdown to select Facebook Pages in Step 4
+  - Added `meta.getPages` endpoint to fetch user's Facebook pages
+  - Added dropdown in Step 4 with all connected pages
+  - Pass selected pageId to batchCreateAds mutation
+- [x] Input lag - Fix slow paste/delete in inputs (use useTransition)
+  - Added `startTransition` wrapper for updateAdSet and updateAd functions
+  - React now prioritizes user input over re-renders
+- [x] Date format - Change schedule display from "2026-01-18 00:05" to "18 January 2026, 00:05 AM"
+  - Updated formatScheduleDate function to use toLocaleDateString with long format
+- [x] Schedule fix - Ensure schedule works
+  - Added `start_time` parameter to ad set creation (ISO 8601 format)
+  - Changed status to ACTIVE (not PAUSED) when schedule is enabled
+  - Both ad set and ads are now set to ACTIVE for scheduled publishing
+- [x] Presets system - Add presets for URL/Headline/FB Page saved in database
+  - Created `ad_presets` table in database
+  - Added `presets.getAll`, `presets.create`, `presets.update`, `presets.delete` endpoints
+  - Added Presets dropdown in Step 4 under FB Page selector
+  - Added "+ New" button to create preset from current values
+  - Added delete button for selected preset
+  - Selecting a preset auto-fills Headline, URL, and FB Page
