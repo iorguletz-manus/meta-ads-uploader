@@ -1928,7 +1928,11 @@ export default function Home() {
             });
           }
           
-          const adsetName = generateAdSetNameFromComposer(image.name);
+          const baseAdsetName = generateAdSetNameFromComposer(image.name);
+          // Add _HOOK1-X suffix to indicate how many hooks are in this adset
+          const adsetName = adsPerAdSet > 1 
+            ? `${baseAdsetName}_HOOK1-${adsPerAdSet}` 
+            : `${baseAdsetName}_HOOK1`;
           
           newAdSets.push({
             id: `adset-${Date.now()}-${i}`,
@@ -3357,6 +3361,16 @@ export default function Home() {
                   <span className="text-xs font-normal text-muted-foreground">
                     ({adSetsPreview.length} Ad Sets, {totalAdsInPreview} Ads)
                   </span>
+                  <button
+                    onClick={() => {
+                      setAdSetsPreview([]);
+                      setShowPreview(false);
+                      toast.success("All Ad Sets removed");
+                    }}
+                    className="ml-2 text-xs text-red-500 hover:text-red-700 hover:underline"
+                  >
+                    Remove All
+                  </button>
                 </CardTitle>
               </div>
             </CardHeader>
