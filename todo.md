@@ -782,7 +782,7 @@
 - [x] Move hardcoded user (iorguletz/cinema10) to database with hashed password
 - [x] Update context.ts to verify JWT and fetch user from database
 - [x] Update routers.ts login procedure to use database authentication
-- [ ] Configure Railway environment variables
+- [x] Configure Railway environment variables (DATABASE_URL pointing to Railway MySQL)
 - [ ] Deploy to Railway
 - [ ] Test Facebook OAuth token persistence on Railway
 - [ ] Test Post Comment feature with Page Access Token
