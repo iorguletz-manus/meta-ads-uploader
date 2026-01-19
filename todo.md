@@ -771,3 +771,18 @@
 - [x] Display post results (postUrl, commentPosted) in creation logs
 - [x] Add FB Page avatar/thumbnail in dropdown
 - [x] Reduce width of FB Page and Presets inputs to ~10% of current size
+
+
+## Railway Migration - Round 32
+
+### Tasks
+- [x] Remove Manus OAuth dependency from authentication
+- [x] Implement simple username/password authentication with bcrypt
+- [x] Add passwordHash column to users table
+- [x] Move hardcoded user (iorguletz/cinema10) to database with hashed password
+- [x] Update context.ts to verify JWT and fetch user from database
+- [x] Update routers.ts login procedure to use database authentication
+- [ ] Configure Railway environment variables
+- [ ] Deploy to Railway
+- [ ] Test Facebook OAuth token persistence on Railway
+- [ ] Test Post Comment feature with Page Access Token

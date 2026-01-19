@@ -43,6 +43,13 @@
       "when": 1768647974180,
       "tag": "0005_awesome_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1768818041463,
+      "tag": "0006_fine_mandroid",
+      "breakpoints": true
     }
   ]
 }

@@ -316,6 +316,60 @@ export async function clearGoogleToken(openId: string): Promise<void> {
   }
 }
 
+// User authentication with password hash
+export async function getUserByUsername(username: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get user: database not available");
+    return undefined;
+  }
+
+  const result = await db.select().from(users).where(eq(users.name, username)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createUserWithPassword(
+  username: string, 
+  passwordHash: string,
+  role: "user" | "admin" = "user"
+): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot create user: database not available");
+    return;
+  }
+
+  try {
+    await db.insert(users).values({
+      openId: `user-${username}-${Date.now()}`,
+      name: username,
+      passwordHash: passwordHash,
+      loginMethod: "password",
+      role: role,
+    });
+  } catch (error) {
+    console.error("[Database] Failed to create user:", error);
+    throw error;
+  }
+}
+
+export async function updateUserPassword(username: string, passwordHash: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot update password: database not available");
+    return;
+  }
+
+  try {
+    await db.update(users)
+      .set({ passwordHash: passwordHash })
+      .where(eq(users.name, username));
+  } catch (error) {
+    console.error("[Database] Failed to update password:", error);
+    throw error;
+  }
+}
+
 // Refresh Google access token using refresh token
 export async function refreshGoogleAccessToken(refreshToken: string): Promise<{
   accessToken: string;

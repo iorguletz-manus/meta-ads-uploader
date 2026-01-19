@@ -1,6 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
-import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings, saveGoogleToken, getGoogleToken, clearGoogleToken, refreshGoogleAccessToken } from "./db";
+import { saveFacebookToken, getFacebookToken, clearFacebookToken, saveAdAccountSettings, getAdAccountSettings, saveGoogleToken, getGoogleToken, clearGoogleToken, refreshGoogleAccessToken, getUserByUsername, createUserWithPassword } from "./db";
+import bcrypt from "bcryptjs";
 import { adPresets } from "../drizzle/schema";
 import { getDb } from "./db";
 import { eq, and } from "drizzle-orm";
@@ -10,10 +11,6 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { SignJWT } from "jose";
 import { ENV } from "./_core/env";
-
-// Fixed credentials - single account
-const FIXED_USERNAME = "iorguletz";
-const FIXED_PASSWORD = "cinema10";
 
 // Meta API base URL
 const META_API_BASE = "https://graph.facebook.com/v24.0";
@@ -152,17 +149,25 @@ export const appRouter = router({
     login: publicProcedure
       .input(z.object({ username: z.string(), password: z.string() }))
       .mutation(async ({ input, ctx }) => {
-        // Validate against fixed credentials
-        if (input.username !== FIXED_USERNAME || input.password !== FIXED_PASSWORD) {
+        // Get user from database
+        const user = await getUserByUsername(input.username);
+        
+        if (!user || !user.passwordHash) {
+          throw new Error("Invalid username or password");
+        }
+        
+        // Verify password
+        const isValidPassword = await bcrypt.compare(input.password, user.passwordHash);
+        if (!isValidPassword) {
           throw new Error("Invalid username or password");
         }
         
         // Create JWT token using SDK's session format
         const secret = new TextEncoder().encode(ENV.cookieSecret);
         const token = await new SignJWT({ 
-          openId: "fixed-user-id",
+          openId: user.openId,
           appId: ENV.appId,
-          name: FIXED_USERNAME,
+          name: user.name,
         })
           .setProtectedHeader({ alg: "HS256", typ: "JWT" })
           .setIssuedAt()
@@ -178,7 +183,7 @@ export const appRouter = router({
         
         return { 
           success: true,
-          user: { name: FIXED_USERNAME }
+          user: { name: user.name }
         };
       }),
     logout: publicProcedure.mutation(({ ctx }) => {

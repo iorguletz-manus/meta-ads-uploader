@@ -34,6 +34,8 @@ export const users = mysqlTable("users", {
   googleRefreshToken: text("googleRefreshToken"),
   /** Google token expiry timestamp */
   googleTokenExpiry: timestamp("googleTokenExpiry"),
+  /** Password hash for simple auth */
+  passwordHash: varchar("passwordHash", { length: 255 }),
 });
 
 export type User = typeof users.$inferSelect;

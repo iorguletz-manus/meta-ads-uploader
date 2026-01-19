@@ -4,7 +4,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
 import { jwtVerify } from "jose";
 import { ENV } from "./env";
-import { getUserByOpenId, upsertUser } from "../db";
+import { getUserByOpenId } from "../db";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -12,11 +12,7 @@ export type TrpcContext = {
   user: User | null;
 };
 
-// Fixed user openId for simple login
-const FIXED_USER_OPEN_ID = "fixed-user-id";
-const FIXED_USER_NAME = "iorguletz";
-
-async function verifySimpleSession(cookieValue: string | undefined): Promise<User | null> {
+async function verifySession(cookieValue: string | undefined): Promise<User | null> {
   if (!cookieValue) return null;
   
   try {
@@ -25,46 +21,14 @@ async function verifySimpleSession(cookieValue: string | undefined): Promise<Use
       algorithms: ["HS256"],
     });
     
-    // Check if it's our fixed user iorguletz
-    if (payload.openId === FIXED_USER_OPEN_ID && payload.name === FIXED_USER_NAME) {
-      // Try to get user from database
-      let dbUser = await getUserByOpenId(FIXED_USER_OPEN_ID);
-      
-      if (!dbUser) {
-        // Create user in database if not exists
-        await upsertUser({
-          openId: FIXED_USER_OPEN_ID,
-          name: FIXED_USER_NAME,
-          loginMethod: "password",
-          role: "admin",
-        });
-        dbUser = await getUserByOpenId(FIXED_USER_OPEN_ID);
-      }
-      
+    // Get user from database by openId from JWT
+    if (payload.openId && typeof payload.openId === 'string') {
+      const dbUser = await getUserByOpenId(payload.openId);
       if (dbUser) {
         return dbUser;
       }
-      
-      // Fallback to static user if database fails
-      return {
-        id: 1,
-        openId: FIXED_USER_OPEN_ID,
-        name: FIXED_USER_NAME,
-        email: null,
-        loginMethod: "password",
-        role: "admin",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastSignedIn: new Date(),
-        facebookAccessToken: null,
-        facebookTokenExpiry: null,
-        selectedAdAccountId: null,
-        enabledAdAccountIds: null,
-        googleAccessToken: null,
-        googleRefreshToken: null,
-        googleTokenExpiry: null,
-      };
     }
+    
     return null;
   } catch {
     return null;
@@ -77,11 +41,10 @@ export async function createContext(
   let user: User | null = null;
 
   try {
-    // Only use simple login verification for iorguletz
     const cookies = parseCookieHeader(opts.req.headers.cookie || "");
     const sessionCookie = cookies[COOKIE_NAME];
     
-    user = await verifySimpleSession(sessionCookie);
+    user = await verifySession(sessionCookie);
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;
