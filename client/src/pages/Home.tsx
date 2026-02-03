@@ -578,6 +578,22 @@ export default function Home() {
     }
   }, [adAccountsQuery.data, adAccountsQuery.isLoading, adAccountsQuery.isError, adAccountSettingsQuery.data, fbConnected, fbAccessToken]);
 
+  // Reset selections when Ad Account changes
+  const previousAdAccountRef = useRef(selectedAdAccount);
+  useEffect(() => {
+    if (previousAdAccountRef.current && previousAdAccountRef.current !== selectedAdAccount && selectedAdAccount) {
+      // Ad Account changed - reset campaign, adset, ad selections
+      console.log('[AdAccount] Changed from', previousAdAccountRef.current, 'to', selectedAdAccount);
+      setSelectedCampaign('');
+      setSelectedAdSet('');
+      setSelectedAd('');
+      setCampaignSearch('');
+      setAdSetSearch('');
+      setAdSearch('');
+    }
+    previousAdAccountRef.current = selectedAdAccount;
+  }, [selectedAdAccount]);
+
   // Save to localStorage when values change
   useEffect(() => { setLS(LS_KEYS.FB_TOKEN, fbAccessToken); }, [fbAccessToken]);
   useEffect(() => { setLS(LS_KEYS.FB_CONNECTED, fbConnected); }, [fbConnected]);
